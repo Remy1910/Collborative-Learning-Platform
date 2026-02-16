@@ -54,4 +54,31 @@ const getCourses = async (req, res) => {
   }
 };
 
-module.exports = { createCourse, enrollCourse, getCourses };
+const enrollInCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    const course = await Course.findById(courseId);
+
+    if (!course) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    // Check already enrolled
+    if (course.students.includes(req.user.id)) {
+      return res.status(400).json({ message: "Already enrolled" });
+    }
+
+    course.students.push(req.user.id);
+    await course.save();
+
+    res.json({
+      message: "Enrolled successfully",
+      course
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+module.exports = { createCourse, enrollCourse, getCourses, enrollInCourse };
