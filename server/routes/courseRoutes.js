@@ -11,18 +11,13 @@ const {
   getCourses
 } = require("../controllers/courseController");
 
-// Faculty Only
+// Faculty Only - Create Course
 router.post("/", protect, authorizeRoles("faculty"), createCourse);
 
-// Student Enroll
-router.post("/:id/enroll", protect, authorizeRoles("student"), enrollCourse);
-
-// Get All Courses
+// Get All Courses (Protected)
 router.get("/", protect, getCourses);
 
-router.post("/:courseId/enroll",protect,authorizeRoles("student"),enrollCourse);
-
-// Student enroll
-router.post("/enroll/:courseId",protect,authorizeRoles("student"),enrollInCourse);
+// Student Enroll in Course (single consolidated endpoint)
+router.post("/:courseId/enroll", protect, authorizeRoles("student"), enrollInCourse);
 
 module.exports = router;

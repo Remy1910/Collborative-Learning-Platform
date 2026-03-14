@@ -6,6 +6,8 @@ require("dotenv").config();
 const authRoutes = require("./routes/authRoutes");
 const protect = require("./middleware/authMiddleware");
 const courseRoutes = require("./routes/courseRoutes");
+const quizRoutes = require("./routes/quizRoutes");
+const quizResponseRoutes = require("./routes/quizResponseRoutes");
 
 const app = express();
 
@@ -43,6 +45,9 @@ app.use("/api/assignments", assignmentRoutes);
 
 app.use("/api/courses", courseRoutes);
 
+app.use("/api/quizzes", quizRoutes);
+
+app.use("/api/quiz-responses", quizResponseRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
