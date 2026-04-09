@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 import FacultyDashboard from "./pages/FacultyDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
 import QuizTaker from "./pages/QuizTaker";
@@ -21,12 +22,25 @@ function ProtectedRoute({ children, allowedRoles }) {
   return children;
 }
 
+// Redirect logged-in users away from auth pages
+function GuestRoute({ children }) {
+  const token = localStorage.getItem("token");
+  const role = localStorage.getItem("role");
+
+  if (token) {
+    return <Navigate to={role === "faculty" ? "/faculty/dashboard" : "/student/dashboard"} />;
+  }
+
+  return children;
+}
+
 function App() {
   return (
     <Router>
       <Routes>
         {/* Public routes */}
-        <Route path="/" element={<LoginPage />} />
+        <Route path="/" element={<GuestRoute><LoginPage /></GuestRoute>} />
+        <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
 
         {/* Faculty dashboard */}
         <Route

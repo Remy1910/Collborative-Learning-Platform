@@ -49,14 +49,12 @@ router.patch("/:quizId/questions/:questionId", protect, authorizeRoles("faculty"
 // Delete question
 router.delete("/:quizId/questions/:questionId", protect, authorizeRoles("faculty"), deleteQuestion);
 
+// Get assigned quizzes
+router.get("/assigned/my-quizzes", protect, authorizeRoles("student"), getStudentQuizzes);
+
 // ── Common Routes ──
 
 // Get quiz by ID (for both viewing and taking)
 router.get("/:quizId", protect, getQuizById);
-
-// ── Student Routes ──
-
-// Get assigned quizzes
-router.get("/assigned/my-quizzes", protect, authorizeRoles("student"), getStudentQuizzes);
 
 module.exports = router;

@@ -80,6 +80,8 @@ function LoginPage() {
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", role);
+      if (data.userId) localStorage.setItem("userId", data.userId);
+      if (data.name) localStorage.setItem("userName", data.name);
 
       if (role === "student") {
         window.location.href = "/student/dashboard";
@@ -225,7 +227,7 @@ function LoginPage() {
 
           <p className="cl-footer">
             No account?{" "}
-            <a href="/register" className="cl-link">Contact your administrator</a>
+            <a href="/register" className="cl-link">Register here</a>
           </p>
         </div>
       </div>
