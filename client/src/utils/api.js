@@ -56,6 +56,28 @@ export const authAPI = {
       if (!r.ok) throw new Error(json.message || "Registration failed");
       return json;
     }),
+
+  forgotPassword: (email) =>
+    fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).then(async (r) => {
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Request failed");
+      return json;
+    }),
+
+  resetPassword: (token, password) =>
+    fetch(`${API_BASE_URL}/auth/reset-password/${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    }).then(async (r) => {
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Reset password failed");
+      return json;
+    }),
 };
 
 // ── Course API ───────────────────────────────────────────────────────────────

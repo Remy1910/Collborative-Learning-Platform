@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { authAPI } from "../utils/api";
 import "../styles/login.css";
 
 // ── SVG Icons (zero extra deps) ──
@@ -65,21 +66,7 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/auth/login`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, role }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.message || "Invalid credentials. Please try again.");
-        return;
-      }
+      const data = await authAPI.login({ email, password, role });
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", role);
@@ -91,8 +78,8 @@ function LoginPage() {
       } else {
         window.location.href = "/faculty/dashboard";
       }
-    } catch {
-      setError("Network error. Please check your connection.");
+    } catch (err) {
+      setError(err.message || "Invalid credentials. Please try again.");
     }
 
     setLoading(false);
