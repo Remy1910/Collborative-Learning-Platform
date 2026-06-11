@@ -14,7 +14,7 @@ const quizRoutes = require("./routes/quizRoutes");
 const quizResponseRoutes = require("./routes/quizResponseRoutes");
 
 const app = express();
-
+app.set("trust proxy", 1);
 // Security middleware
 app.use(helmet());
 app.use(mongoSanitize());
