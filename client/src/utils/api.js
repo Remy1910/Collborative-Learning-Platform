@@ -2,6 +2,10 @@ const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : "http://localhost:5001/api";
 
+
+console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
+console.log("API_BASE_URL:", API_BASE_URL);
+
 // Helper to get auth header
 export const getAuthHeader = () => {
   const token = localStorage.getItem("token");
