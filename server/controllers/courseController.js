@@ -41,7 +41,7 @@ const enrollCourse = async (req, res) => {
     }
 
     // Prevent duplicate enrollment
-    if (course.students.includes(req.user.id)) {
+    if (course.students.some(id => id.toString() === req.user.id)) {
       return res.status(400).json({ message: "Already enrolled" });
     }
 
@@ -84,7 +84,7 @@ const enrollInCourse = async (req, res) => {
     }
 
     // Check if already enrolled
-    if (course.students.includes(req.user.id)) {
+    if (course.students.some(id => id.toString() === req.user.id)) {
       return res.status(400).json({ message: "You are already enrolled in this course" });
     }
 

@@ -87,7 +87,7 @@ const submitAssignment = async (req, res) => {
     const course = await Course.findById(assignment.course);
 
     // Check if student enrolled
-    if (!course.students.includes(req.user.id)) {
+    if (!course.students.some(id => id.toString() === req.user.id)) {
       return res.status(403).json({ message: "You are not enrolled in this course" });
     }
 

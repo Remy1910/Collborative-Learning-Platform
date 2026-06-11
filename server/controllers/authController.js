@@ -50,7 +50,7 @@ const register = async (req, res) => {
 // LOGIN
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body; // ✅ add role here
 
     // Validate inputs
     if (!validateEmail(email)) {
@@ -64,6 +64,11 @@ const login = async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // Role check
+    if (role && user.role !== role) {
+      return res.status(403).json({ message: `Access denied. Please use the ${user.role} portal.` });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -88,5 +93,6 @@ const login = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 module.exports = { register, login };

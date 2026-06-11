@@ -13,7 +13,7 @@ const startQuiz = async (req, res) => {
       return res.status(404).json({ message: "Quiz not found or not published" });
     }
 
-    if (!quiz.assignedTo.includes(req.user.id)) {
+    if (!quiz.assignedTo.some(id => id.toString() === req.user.id)) {
       return res.status(403).json({ message: "This quiz is not assigned to you" });
     }
 
