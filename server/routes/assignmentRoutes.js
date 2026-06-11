@@ -23,6 +23,9 @@ router.post("/submit", protect, authorizeRoles("student"), submitAssignment);
 // Faculty gives marks
 router.post("/mark", protect, authorizeRoles("faculty"), giveMarks);
 
+// Faculty dashboard stats
+router.get("/stats", protect, authorizeRoles("faculty"), getFacultyStats);
+
 // Faculty view submissions
 router.get("/:assignmentId/submissions",protect,authorizeRoles("faculty"),viewSubmissions);
 

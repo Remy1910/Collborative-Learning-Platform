@@ -2,22 +2,40 @@ const User = require("../models/User");
 console.log("User model check:", User);
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { validateEmail, validatePassword, validateName } = require("../utils/validation");
 
 // REGISTER
 const register = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    const existingUser = await User.findOne({ email });
+    // Validate inputs
+    if (!validateName(name)) {
+      return res.status(400).json({ message: "Name must be between 2-100 characters" });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
+    }
+
+    if (!["student", "faculty", "admin"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role. Must be student, faculty, or admin" });
+    }
+
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({ message: "Email already registered" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: email.toLowerCase(),
       password: hashedPassword,
       role
     });
@@ -32,16 +50,30 @@ const register = async (req, res) => {
 // LOGIN
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body; // ✅ add role here
 
-    const user = await User.findOne({ email });
+    // Validate inputs
+    if (!validateEmail(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    if (!password) {
+      return res.status(400).json({ message: "Password is required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // Role check
+    if (role && user.role !== role) {
+      return res.status(403).json({ message: `Access denied. Please use the ${user.role} portal.` });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const token = jwt.sign(
@@ -50,11 +82,17 @@ const login = async (req, res) => {
       { expiresIn: "1d" }
     );
 
-    res.json({ token, role: user.role });
+    res.json({
+      token,
+      role: user.role,
+      userId: user._id,
+      name: user.name
+    });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 module.exports = { register, login };
