@@ -37,8 +37,6 @@ const IconArrow = () => (
 );
 
 function LoginPage() {
-  // ── Your original state — untouched ──
-  const [role, setRole] = useState("student");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -57,7 +55,7 @@ function LoginPage() {
     return errs;
   };
 
-  // ── Your original handleSubmit — logic unchanged ──
+  // ── Updated handleSubmit to handle dynamic roles ──
   const handleSubmit = async () => {
     setError("");
     const errs = validate();
@@ -66,17 +64,19 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      const data = await authAPI.login({ email, password, role });
+      const data = await authAPI.login({ email, password });
 
       localStorage.setItem("token", data.token);
-      localStorage.setItem("role", role);
+      localStorage.setItem("role", data.role);
       if (data.userId) localStorage.setItem("userId", data.userId);
       if (data.name) localStorage.setItem("userName", data.name);
 
-      if (role === "student") {
+      if (data.role === "student") {
         window.location.href = "/student/dashboard";
-      } else {
+      } else if (data.role === "faculty") {
         window.location.href = "/faculty/dashboard";
+      } else {
+        window.location.href = "/";
       }
     } catch (err) {
       setError(err.message || "Invalid credentials. Please try again.");
@@ -95,7 +95,7 @@ function LoginPage() {
       <div className="cl-left">
         <div className="cl-brand">
           <div className="cl-brand-mark"><IconGrad /></div>
-          <span className="cl-brand-name">CampusLink</span>
+          <span className="cl-brand-name">Acadexa</span>
         </div>
 
         <div className="cl-hero">
@@ -108,17 +108,17 @@ function LoginPage() {
 
         <div className="cl-stats">
           <div className="cl-stat">
-            <span className="cl-stat-val">2.4k</span>
+            <span className="cl-stat-val">00</span>
             <span className="cl-stat-lbl">Students</span>
           </div>
           <div className="cl-stat-div" />
           <div className="cl-stat">
-            <span className="cl-stat-val">180</span>
+            <span className="cl-stat-val">00</span>
             <span className="cl-stat-lbl">Faculty</span>
           </div>
           <div className="cl-stat-div" />
           <div className="cl-stat">
-            <span className="cl-stat-val">340+</span>
+            <span className="cl-stat-val">00</span>
             <span className="cl-stat-lbl">Courses</span>
           </div>
         </div>
@@ -130,23 +130,7 @@ function LoginPage() {
 
           <div className="cl-card-header">
             <h2>Sign in</h2>
-            <p>Access your {role} account</p>
-          </div>
-
-          {/* Role toggle — replaces the plain <select> */}
-          <div className="cl-toggle">
-            <button
-              className={`cl-toggle-btn${role === "student" ? " active" : ""}`}
-              onClick={() => { setRole("student"); setError(""); }}
-            >
-              🎓 Student
-            </button>
-            <button
-              className={`cl-toggle-btn${role === "faculty" ? " active" : ""}`}
-              onClick={() => { setRole("faculty"); setError(""); }}
-            >
-              🏫 Faculty
-            </button>
+            <p>Access your academic account</p>
           </div>
 
           {/* Error alert */}
@@ -168,7 +152,7 @@ function LoginPage() {
                 id="cl-email"
                 type="email"
                 className={`cl-input${fieldErrs.email ? " error" : ""}`}
-                placeholder={role === "student" ? "student@college.edu" : "faculty@college.edu"}
+                placeholder="name@college.edu"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); clearFieldErr("email"); }}
                 onKeyDown={handleKey}
@@ -209,7 +193,7 @@ function LoginPage() {
           <button className="cl-btn" onClick={handleSubmit} disabled={loading}>
             {loading
               ? <><div className="cl-spinner" />Signing in…</>
-              : <>{`Sign in as ${role === "student" ? "Student" : "Faculty"}`}<IconArrow /></>
+              : <>Sign in<IconArrow /></>
             }
           </button>
 
