@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { authAPI } from "../utils/api";
 import "../styles/login.css";
 
@@ -45,6 +45,14 @@ function LoginPage() {
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrs, setFieldErrs] = useState({});
+
+  // Show a message if redirected here after being logged out elsewhere
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reason") === "session-invalidated") {
+      setError("You were logged out because your account was signed in on another device.");
+    }
+  }, []);
 
   const validate = () => {
     const errs = {};
