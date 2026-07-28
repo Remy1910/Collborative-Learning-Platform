@@ -27,6 +27,17 @@ export const apiCall = async (endpoint, options = {}) => {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: "Network error" }));
+
+    if (error.code === "SESSION_INVALIDATED") {
+      localStorage.removeItem("token");
+      localStorage.removeItem("userId");
+      localStorage.removeItem("role");
+      // adjust the removed keys to match whatever you actually store on login
+
+      window.location.href = "/login?reason=session-invalidated";
+      return; // stop here, don't let the caller try to use a rejected response
+    }
+
     throw new Error(error.message || "API Error");
   }
 
@@ -45,6 +56,8 @@ export const authAPI = {
       if (!r.ok) throw new Error(json.message || "Login failed");
       return json;
     }),
+
+  logout: () => apiCall("/auth/logout", { method: "POST" }),   // <-- added
 
   register: (data) =>
     fetch(`${API_BASE_URL}/auth/register`, {

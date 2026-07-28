@@ -52,9 +52,8 @@ const register = async (req, res) => {
 // LOGIN
 const login = async (req, res) => {
   try {
-    const { email, password, role } = req.body; // ✅ add role here
+    const { email, password, role } = req.body;
 
-    // Validate inputs
     if (!validateEmail(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
@@ -68,7 +67,6 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Role check
     if (role && user.role !== role) {
       return res.status(403).json({ message: `Access denied. Please use the ${user.role} portal.` });
     }
@@ -78,8 +76,13 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    // Generate a new session ID and store it — this invalidates any previous session
+    const sessionId = crypto.randomBytes(16).toString("hex");
+    user.currentSessionId = sessionId;
+    await user.save();
+
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: user._id, role: user.role, sessionId },   // <-- sessionId added
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
@@ -183,7 +186,6 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
-    // Hash token from param to compare with the one in DB
     const hashedToken = crypto
       .createHash("sha256")
       .update(token)
@@ -198,13 +200,12 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired password reset token" });
     }
 
-    // Set new password
     const hashedPassword = await bcrypt.hash(password, 10);
     user.password = hashedPassword;
 
-    // Clear reset fields
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
+    user.currentSessionId = null;   // <-- added: invalidate any active session
 
     await user.save();
 
@@ -214,4 +215,15 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, forgotPassword, resetPassword };
+// LOGOUT
+const logout = async (req, res) => {
+  try {
+    // req.user is set by the protect middleware — it's the decoded JWT payload
+    await User.findByIdAndUpdate(req.user.id, { currentSessionId: null });
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+module.exports = { register, login, forgotPassword, resetPassword, logout };

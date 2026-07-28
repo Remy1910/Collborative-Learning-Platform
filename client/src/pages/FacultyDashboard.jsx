@@ -1,41 +1,41 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI } from "../utils/api";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const IconHome = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
 );
 const IconBook = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
 );
 const IconQuiz = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
 );
 const IconClip = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></svg>
 );
 const IconUsers = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
 );
 const IconPlus = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
 );
 const IconLogOut = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
 );
 const IconX = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
 );
 const IconCheck = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
 );
 const IconTrash = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
 );
 const IconEdit = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 );
 
 // ── Modal wrapper ──────────────────────────────────────────────────────────
@@ -209,13 +209,19 @@ function FacultyDashboard() {
   };
 
   // ── Logout ─────────────────────────────────────────────────────────────
-  const handleLogout = () => {
-    ["token", "role", "userId", "userName"].forEach(k => localStorage.removeItem(k));
-    navigate("/");
+  // ── Logout ─────────────────────────────────────────────────────────────
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout();
+    } catch (err) {
+      // ignore — token may already be invalid/expired, still clear locally
+    } finally {
+      ["token", "role", "userId", "userName"].forEach(k => localStorage.removeItem(k));
+      navigate("/");
+    }
   };
-
-  const activeQuizzes  = quizzes.filter(q => q.status === "active").length;
-  const draftQuizzes   = quizzes.filter(q => q.status === "draft").length;
+  const activeQuizzes = quizzes.filter(q => q.status === "active").length;
+  const draftQuizzes = quizzes.filter(q => q.status === "draft").length;
   const publishedCount = quizzes.filter(q => q.isPublished).length;
 
   return (
@@ -241,11 +247,11 @@ function FacultyDashboard() {
       {/* ── Tabs ── */}
       <nav className="dashboard-tabs">
         {[
-          { id: "overview",     label: "Overview",     icon: <IconHome /> },
-          { id: "courses",      label: "Courses",      icon: <IconBook /> },
-          { id: "quizzes",      label: "Quizzes",      icon: <IconQuiz /> },
-          { id: "assignments",  label: "Assignments",  icon: <IconClip /> },
-          { id: "students",     label: "Students",     icon: <IconUsers /> },
+          { id: "overview", label: "Overview", icon: <IconHome /> },
+          { id: "courses", label: "Courses", icon: <IconBook /> },
+          { id: "quizzes", label: "Quizzes", icon: <IconQuiz /> },
+          { id: "assignments", label: "Assignments", icon: <IconClip /> },
+          { id: "students", label: "Students", icon: <IconUsers /> },
         ].map(tab => (
           <button
             key={tab.id}
@@ -259,7 +265,7 @@ function FacultyDashboard() {
 
       {/* ── Alerts ── */}
       <div style={{ padding: "0 2rem" }}>
-        {error   && <div className="alert alert-error"   onClick={() => setError("")}  >{error}   <span>✕</span></div>}
+        {error && <div className="alert alert-error" onClick={() => setError("")}  >{error}   <span>✕</span></div>}
         {success && <div className="alert alert-success" onClick={() => setSuccess("")}>{success} <span>✕</span></div>}
       </div>
 
@@ -276,10 +282,10 @@ function FacultyDashboard() {
 
             <div className="stats-grid">
               {[
-                { label: "Total Courses",    value: courses.length,    color: "#2563eb", icon: "📚" },
-                { label: "Total Quizzes",    value: quizzes.length,    color: "#7c3aed", icon: "📝" },
-                { label: "Active Quizzes",   value: activeQuizzes,     color: "#059669", icon: "✅" },
-                { label: "Assignments",      value: stats.totalAssignments, color: "#d97706", icon: "📋" },
+                { label: "Total Courses", value: courses.length, color: "#2563eb", icon: "📚" },
+                { label: "Total Quizzes", value: quizzes.length, color: "#7c3aed", icon: "📝" },
+                { label: "Active Quizzes", value: activeQuizzes, color: "#059669", icon: "✅" },
+                { label: "Assignments", value: stats.totalAssignments, color: "#d97706", icon: "📋" },
               ].map(s => (
                 <div key={s.label} className="stat-card" style={{ borderTop: `4px solid ${s.color}` }}>
                   <div className="stat-icon">{s.icon}</div>
@@ -815,7 +821,7 @@ function AssignmentList({ courseId, onViewSubmissions }) {
     setAssignments([]);
   }, [courseId]);
 
-  if (loading) return <div style={{padding:"1rem"}}><div className="spinner-ring" /></div>;
+  if (loading) return <div style={{ padding: "1rem" }}><div className="spinner-ring" /></div>;
 
   return (
     <div className="assignment-list-empty">
