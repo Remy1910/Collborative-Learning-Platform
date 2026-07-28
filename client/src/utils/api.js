@@ -32,7 +32,7 @@ export const apiCall = async (endpoint, options = {}) => {
       localStorage.removeItem("token");
       localStorage.removeItem("userId");
       localStorage.removeItem("role");
-      // adjust the removed keys to match whatever you actually store on login
+      localStorage.removeItem("userName");
 
       window.location.href = "/login?reason=session-invalidated";
       return; // stop here, don't let the caller try to use a rejected response
