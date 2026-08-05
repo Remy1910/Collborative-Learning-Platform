@@ -286,7 +286,7 @@ const getSubmittedQuizzes = async (req, res) => {
 
     const submissions = await QuizResponse.find({
       quiz: quizId,
-      status: { $in: ["submitted", "graded"] },
+      status: { $in: ["submitted", "graded", "terminated"] },
       isActive: true
     })
       .populate("student", "name email")

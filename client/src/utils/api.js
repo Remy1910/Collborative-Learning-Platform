@@ -217,4 +217,16 @@ export const quizAPI = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  logViolation: (responseId, data) =>
+    apiCall(`/quiz-responses/${responseId}/violation`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  grantReattempt: (responseId, data) =>
+    apiCall(`/quiz-responses/${responseId}/grant-reattempt`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };

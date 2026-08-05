@@ -85,6 +85,11 @@ function FacultyDashboard() {
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [selectedQuiz, setSelectedQuiz] = useState(null);
 
+  // ── Quiz submissions ──
+  const [showQuizSubmissionsModal, setShowQuizSubmissionsModal] = useState(false);
+  const [quizSubmissions, setQuizSubmissions] = useState([]);
+  const [quizSubmissionsLoading, setQuizSubmissionsLoading] = useState(false);
+
   // Forms
   const [courseForm, setCourseForm] = useState({ title: '', description: '' });
   const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', courseId: '', dueDate: '' });
@@ -193,6 +198,37 @@ function FacultyDashboard() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── View Quiz Submissions ─────────────────────────────────────────────
+  const handleViewQuizSubmissions = async (quiz) => {
+    setSelectedQuiz(quiz);
+    setShowQuizSubmissionsModal(true);
+    setQuizSubmissionsLoading(true);
+    try {
+      const data = await quizAPI.getSubmissions(quiz._id);
+      setQuizSubmissions(Array.isArray(data.submissions) ? data.submissions : []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setQuizSubmissionsLoading(false);
+    }
+  };
+
+  // ── Grant Reattempt ────────────────────────────────────────────────────
+  const handleGrantReattempt = async (responseId) => {
+    const reason = window.prompt(
+      "Reason for granting a reattempt (e.g. 'connection dropped during quiz'):"
+    );
+    if (!reason || !reason.trim()) return;
+
+    try {
+      await quizAPI.grantReattempt(responseId, { reason });
+      showMsg("Reattempt granted — student can now retake the quiz.");
+      handleViewQuizSubmissions(selectedQuiz); // refresh the list
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -473,6 +509,13 @@ function FacultyDashboard() {
                               title="Assign to students"
                             >
                               Assign
+                            </button>
+                            <button
+                              className="btn-small btn-secondary"
+                              onClick={() => handleViewQuizSubmissions(quiz)}
+                              title="View submissions"
+                            >
+                              Submissions
                             </button>
                             <button
                               className="btn-small btn-danger"
