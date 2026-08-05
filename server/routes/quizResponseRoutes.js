@@ -12,7 +12,9 @@ const {
   getStudentResponses,
   gradeShortAnswer,
   getQuizStats,
-  getMyResults
+  getMyResults,
+  logViolation,
+  grantReattempt
 } = require("../controllers/quizResponseController");
 
 // ── Student Routes (Taking Quiz) ──
@@ -22,6 +24,12 @@ router.post("/:quizId/start", protect, authorizeRoles("student"), startQuiz);
 
 // Save answer (auto-save)
 router.post("/:responseId/save", protect, authorizeRoles("student"), saveResponse);
+
+// Log a proctoring violation (tab switch, fullscreen exit, blur)
+router.post("/:responseId/violation", protect, authorizeRoles("student"), logViolation);
+
+// Faculty grants a reattempt
+router.post("/:responseId/grant-reattempt", protect, authorizeRoles("faculty"), grantReattempt);
 
 // Submit quiz
 router.post("/:responseId/submit", protect, authorizeRoles("student"), submitQuiz);

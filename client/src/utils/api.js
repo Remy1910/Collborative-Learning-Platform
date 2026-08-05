@@ -211,4 +211,10 @@ export const quizAPI = {
     apiCall(`/quiz-responses/${quizId}/my-response`),
 
   getMyResults: () => apiCall("/quiz-responses/student/my-results"),
+
+  logViolation: (responseId, data) =>
+    apiCall(`/quiz-responses/${responseId}/violation`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };

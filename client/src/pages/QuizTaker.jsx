@@ -1,45 +1,52 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { quizAPI } from "../utils/api";
+import { useQuizProctoring } from "../hooks/useQuizProctoring";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const IconArrowLeft = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
 );
 const IconArrowRight = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
 );
 const IconCheck = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
 );
 const IconClock = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
 );
 
 function QuizTaker() {
   const { quizId } = useParams();
-  const navigate   = useNavigate();
+  const navigate = useNavigate();
 
   // Quiz meta + questions array
-  const [quiz, setQuiz]           = useState(null);
+  const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);   // flat array from server
   const [responseId, setResponseId] = useState(null);
 
   // Local answers map: { [questionId]: answerValue }
   const [answers, setAnswers] = useState({});
 
-  const [currentIdx, setCurrentIdx]           = useState(0);
-  const [timeLeft, setTimeLeft]               = useState(null);
-  const [loading, setLoading]                 = useState(true);
-  const [submitting, setSubmitting]           = useState(false);
-  const [showConfirm, setShowConfirm]         = useState(false);
-  const [result, setResult]                   = useState(null);
-  const [error, setError]                     = useState("");
-  const [savingIdx, setSavingIdx]             = useState(null); // question idx being auto-saved
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [savingIdx, setSavingIdx] = useState(null); // question idx being auto-saved
+
+  // ── Proctoring gate: quiz doesn't actually start loading until the
+  // student clicks "Begin Quiz", since fullscreen requires a user gesture ──
+  const [started, setStarted] = useState(false);
+  const [terminated, setTerminated] = useState(false);
 
   // ── Load quiz & start response ───────────────────────────────────────────
   useEffect(() => {
+    if (!started) return;
     const init = async () => {
       try {
         setLoading(true);
@@ -85,7 +92,37 @@ function QuizTaker() {
       }
     };
     init();
-  }, [quizId]);
+  }, [quizId, started]);
+
+  // ── Proctoring ─────────────────────────────────────────────────────────
+  const handleTerminated = useCallback(() => {
+    setTerminated(true);
+  }, []);
+
+  const {
+    violations,
+    maxViolations,
+    warning,
+    clearWarning,
+    requestFullscreen,
+    exitFullscreen,
+  } = useQuizProctoring({
+    responseId,
+    active: started && !result && !terminated,
+    onTerminated: handleTerminated,
+  });
+
+  const handleBegin = async () => {
+    await requestFullscreen();
+    setStarted(true);
+  };
+
+  // Leave fullscreen once the quiz is over, one way or another
+  useEffect(() => {
+    if (result || terminated) {
+      exitFullscreen();
+    }
+  }, [result, terminated, exitFullscreen]);
 
   // ── Submit handler (memoised to be safe in timer callback) ───────────────
   const handleSubmitQuiz = useCallback(async () => {
@@ -145,6 +182,39 @@ function QuizTaker() {
     const a = answers[q._id];
     return a !== null && a !== undefined && a !== "";
   }).length;
+
+  // ── Pre-quiz proctoring gate ─────────────────────────────────────────────
+  if (!started) {
+    return (
+      <div className="quiz-taker">
+        <div style={{ padding: "2rem", maxWidth: "560px", margin: "0 auto" }}>
+          <div className="result-screen">
+            <div style={{ fontSize: "3rem" }}>🔒</div>
+            <h2>This quiz is proctored</h2>
+            <p className="result-message">
+              You must stay in fullscreen for the entire quiz. Switching tabs,
+              minimizing the window, or exiting fullscreen counts as a violation.
+              After 3 violations, your quiz will be automatically submitted.
+            </p>
+            <button
+              className="btn-primary"
+              style={{ width: "100%", justifyContent: "center", marginTop: "1rem" }}
+              onClick={handleBegin}
+            >
+              Enter Fullscreen &amp; Begin Quiz
+            </button>
+            <button
+              className="btn-secondary"
+              style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem" }}
+              onClick={() => navigate("/student/dashboard")}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── States ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -216,6 +286,35 @@ function QuizTaker() {
               </div>
             )}
 
+            <button
+              className="btn-primary"
+              style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem" }}
+              onClick={() => navigate("/student/dashboard")}
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Terminated screen (auto-submitted after 3 proctoring violations) ────
+  if (terminated) {
+    return (
+      <div className="quiz-taker">
+        <div className="quiz-header">
+          <h1>{quiz?.title}</h1>
+        </div>
+        <div style={{ padding: "2rem" }}>
+          <div className="result-screen">
+            <div className="result-icon failed">✗</div>
+            <h2>Quiz Auto-Submitted</h2>
+            <p className="result-message">
+              Your quiz was automatically submitted after {maxViolations} proctoring
+              violations. If you believe this was a mistake or caused by a technical
+              issue, contact your instructor — they can grant you a reattempt.
+            </p>
             <button
               className="btn-primary"
               style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem" }}
@@ -417,7 +516,7 @@ function QuizTaker() {
             {questions.map((q, idx) => {
               const a = answers[q._id];
               const isAnswered = a !== null && a !== undefined && a !== "";
-              const isCurrent  = idx === currentIdx;
+              const isCurrent = idx === currentIdx;
               return (
                 <button
                   key={q._id}
@@ -449,6 +548,38 @@ function QuizTaker() {
           </div>
         </aside>
       </div>
+
+      {/* ── Proctoring Warning Modal ── */}
+      {warning && !terminated && (
+        <div className="modal-overlay">
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚠️ Proctoring Warning</h2>
+            </div>
+            <div className="modal-body">
+              <p style={{ textAlign: "center", color: "#64748b", marginBottom: "1rem" }}>
+                {warning.reason}.
+              </p>
+              <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "8px", padding: "0.75rem", marginBottom: "1rem", fontSize: "0.875rem", color: "#78350f", textAlign: "center" }}>
+                Violation {warning.count} of {maxViolations}. One more and your quiz will
+                be automatically submitted.
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn-primary"
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={async () => {
+                  clearWarning();
+                  await requestFullscreen();
+                }}
+              >
+                Return to Fullscreen &amp; Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Submit Confirmation Modal ── */}
       {showConfirm && (

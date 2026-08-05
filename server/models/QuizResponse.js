@@ -22,8 +22,8 @@ const quizResponseSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: "Question"
         },
-        studentAnswer: mongoose.Schema.Types.Mixed, // String, Boolean, or Array
-        isCorrect: Boolean, // null for short answer
+        studentAnswer: mongoose.Schema.Types.Mixed,
+        isCorrect: Boolean,
         marksObtained: {
           type: Number,
           default: 0
@@ -36,7 +36,7 @@ const quizResponseSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["inprogress", "submitted", "graded"],
+      enum: ["inprogress", "submitted", "graded", "terminated", "superseded"],
       default: "inprogress"
     },
     startedAt: {
@@ -44,17 +44,37 @@ const quizResponseSchema = new mongoose.Schema(
       default: Date.now
     },
     submittedAt: Date,
-    timeSpent: Number, // in seconds
-    isPassed: Boolean
+    timeSpent: Number,
+    isPassed: Boolean,
+
+    attemptNumber: {
+      type: Number,
+      default: 1
+    },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+
+    violations: [
+      {
+        reason: { type: String, required: true },
+        timestamp: { type: Date, default: Date.now }
+      }
+    ],
+
+    reattemptGranted: {
+      grantedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      reason: String,
+      grantedAt: Date
+    }
   },
   { timestamps: true }
 );
 
-// Compound index for unique submissions
-quizResponseSchema.index({ quiz: 1, student: 1 }, { unique: true });
-// Index for faculty to view submissions
+quizResponseSchema.index({ quiz: 1, student: 1, attemptNumber: 1 }, { unique: true });
+quizResponseSchema.index({ quiz: 1, student: 1, isActive: 1 });
 quizResponseSchema.index({ quiz: 1, status: 1 });
-// Index for student to view their responses
 quizResponseSchema.index({ student: 1, submittedAt: -1 });
 
 module.exports = mongoose.model("QuizResponse", quizResponseSchema);

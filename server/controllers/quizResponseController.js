@@ -17,25 +17,35 @@ const startQuiz = async (req, res) => {
       return res.status(403).json({ message: "This quiz is not assigned to you" });
     }
 
-    // Check if already started
+    // Check if there's already an active attempt (in progress, submitted, graded, or terminated)
     let response = await QuizResponse.findOne({
       quiz: quizId,
-      student: req.user.id
+      student: req.user.id,
+      isActive: true
     });
 
     if (response) {
-      // If already submitted, don't allow restart
-      if (response.status === "submitted" || response.status === "graded") {
-        return res.status(400).json({
-          message: "You have already submitted this quiz",
-          response
-        });
+      // Resume an in-progress attempt
+      if (response.status === "inprogress") {
+        return res.json({ message: "Quiz resumed", response });
       }
-      // Return existing in-progress response
-      return res.json({ message: "Quiz started", response });
+      // Already finished (submitted/graded/terminated) — no automatic restart.
+      // A new attempt can only be created via a faculty-granted reattempt.
+      return res.status(400).json({
+        message: "You have already completed this quiz. Contact your instructor if you believe this is an error.",
+        response
+      });
     }
 
-    // Create new response
+    // No active attempt exists — this is a fresh attempt (attemptNumber 1, or first attempt after being granted a reattempt)
+    // Figure out the correct attemptNumber by checking the highest existing attempt for this quiz+student
+    const lastAttempt = await QuizResponse.findOne({
+      quiz: quizId,
+      student: req.user.id
+    }).sort({ attemptNumber: -1 });
+
+    const nextAttemptNumber = lastAttempt ? lastAttempt.attemptNumber + 1 : 1;
+
     const questions = await Question.find({ quiz: quizId, isDeleted: false })
       .select("_id type questionText marks options correctAnswer modelAnswer order")
       .sort({ order: 1 });
@@ -52,7 +62,9 @@ const startQuiz = async (req, res) => {
       student: req.user.id,
       responses,
       status: "inprogress",
-      startedAt: new Date()
+      startedAt: new Date(),
+      attemptNumber: nextAttemptNumber,
+      isActive: true
     });
 
     res.status(201).json({
@@ -133,6 +145,74 @@ const saveResponse = async (req, res) => {
   }
 };
 
+// Student's proctoring violation gets logged server-side (tamper-resistant against refresh)
+const logViolation = async (req, res) => {
+  try {
+    const { responseId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: "Violation reason is required" });
+    }
+
+    const response = await QuizResponse.findById(responseId);
+    if (!response) {
+      return res.status(404).json({ message: "Response not found" });
+    }
+
+    if (response.student.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (response.status !== "inprogress") {
+      // Quiz already finished (submitted/terminated/graded) — nothing to log against
+      return res.status(400).json({ message: "Quiz is not in progress" });
+    }
+
+    const MAX_VIOLATIONS = 3;
+
+    response.violations.push({
+      reason: reason.trim(),
+      timestamp: new Date()
+    });
+
+    const violationCount = response.violations.length;
+    let terminated = false;
+
+    if (violationCount >= MAX_VIOLATIONS) {
+      // Server-side auto-termination — this is the authoritative decision, not the frontend's
+      let totalMarks = 0;
+      response.responses.forEach(r => {
+        totalMarks += r.marksObtained || 0;
+      });
+
+      response.totalMarksObtained = totalMarks;
+      response.status = "terminated";
+      response.submittedAt = new Date();
+      response.timeSpent = Math.round((Date.now() - response.startedAt) / 1000);
+
+      // isPassed requires the quiz's passMarks — fetch it
+      const quiz = await Quiz.findById(response.quiz).select("passMarks");
+      response.isPassed = quiz ? totalMarks >= quiz.passMarks : false;
+
+      terminated = true;
+    }
+
+    await response.save();
+
+    res.json({
+      message: terminated
+        ? "Maximum violations reached — quiz has been auto-submitted"
+        : "Violation logged",
+      violationCount,
+      maxViolations: MAX_VIOLATIONS,
+      terminated
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Student submits completed quiz
 const submitQuiz = async (req, res) => {
   try {
@@ -206,7 +286,8 @@ const getSubmittedQuizzes = async (req, res) => {
 
     const submissions = await QuizResponse.find({
       quiz: quizId,
-      status: { $in: ["submitted", "graded"] }
+      status: { $in: ["submitted", "graded"] },
+      isActive: true
     })
       .populate("student", "name email")
       .select("student totalMarksObtained status submittedAt isPassed")
@@ -237,7 +318,8 @@ const getStudentResponses = async (req, res) => {
 
     const response = await QuizResponse.findOne({
       quiz: quizId,
-      student: req.user.id
+      student: req.user.id,
+      isActive: true
     })
       .populate("quiz", "title showAnswers")
       .populate("responses.question", "type questionText marks options correctAnswer modelAnswer");
@@ -334,7 +416,8 @@ const getQuizStats = async (req, res) => {
 
     const submissions = await QuizResponse.find({
       quiz: quizId,
-      status: { $in: ["submitted", "graded"] }
+      status: { $in: ["submitted", "graded"] },
+      isActive: true
     });
 
     const totalAssigned = quiz.assignedTo.length;
@@ -381,7 +464,8 @@ const getMyResults = async (req, res) => {
   try {
     const results = await QuizResponse.find({
       student: req.user.id,
-      status: { $in: ["submitted", "graded"] }
+      status: { $in: ["submitted", "graded"] },
+      isActive: true
     })
       .populate("quiz", "title subject totalMarks")
       .select("quiz totalMarksObtained isPassed submittedAt")
@@ -403,6 +487,49 @@ const getMyResults = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+// Faculty grants a student a fresh attempt (e.g. after a tech glitch or wrongful auto-termination)
+const grantReattempt = async (req, res) => {
+  try {
+    const { responseId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: "A reason is required to grant a reattempt" });
+    }
+
+    const oldResponse = await QuizResponse.findById(responseId).populate("quiz");
+    if (!oldResponse) {
+      return res.status(404).json({ message: "Quiz response not found" });
+    }
+
+    const quiz = oldResponse.quiz;
+    if (!quiz || quiz.createdBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized to grant a reattempt for this quiz" });
+    }
+
+    if (oldResponse.status === "inprogress") {
+      return res.status(400).json({ message: "This attempt is still in progress and cannot be reattempted yet" });
+    }
+
+    if (!oldResponse.isActive) {
+      return res.status(400).json({ message: "This attempt has already been superseded" });
+    }
+
+    // Supersede the old attempt — the student's next "Start Quiz" click will create
+    // a fresh QuizResponse via startQuiz(), with the correct attemptNumber and startedAt.
+    oldResponse.isActive = false;
+    oldResponse.status = "superseded";
+    await oldResponse.save();
+
+    res.json({
+      message: "Reattempt granted — the student can now restart this quiz.",
+      quizId: quiz._id,
+      studentId: oldResponse.student
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   startQuiz,
@@ -412,5 +539,7 @@ module.exports = {
   getStudentResponses,
   gradeShortAnswer,
   getQuizStats,
-  getMyResults
+  getMyResults,
+  logViolation,
+  grantReattempt
 };
