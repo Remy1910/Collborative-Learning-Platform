@@ -848,6 +848,60 @@ function FacultyDashboard() {
         </Modal>
       )}
 
+      {/* Quiz Submissions Modal */}
+      {showQuizSubmissionsModal && selectedQuiz && (
+        <Modal
+          title={`Submissions — ${selectedQuiz.title}`}
+          onClose={() => setShowQuizSubmissionsModal(false)}
+        >
+          <div className="modal-body">
+            {quizSubmissionsLoading ? (
+              <Spinner />
+            ) : quizSubmissions.length === 0 ? (
+              <div className="empty-mini">No submissions yet.</div>
+            ) : (
+              <div className="submissions-list">
+                {quizSubmissions.map(sub => (
+                  <div key={sub._id} className="submission-item">
+                    <div className="submission-info">
+                      <div className="student-name">{sub.student?.name || "Student"}</div>
+                      <div className="submission-content">
+                        {sub.status === "terminated" ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600 }}>
+                            ⚠️ Auto-submitted (proctoring violations)
+                          </span>
+                        ) : (
+                          <span style={{ color: "#64748b" }}>
+                            {sub.status === "graded" ? "Graded" : "Submitted"}
+                            {sub.submittedAt ? ` • ${new Date(sub.submittedAt).toLocaleString()}` : ""}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="submission-right" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span className="marks-badge">
+                        {sub.totalMarksObtained} {sub.isPassed ? "✓" : "✗"}
+                      </span>
+                      {sub.status === "terminated" && (
+                        <button
+                          className="btn-small btn-secondary"
+                          onClick={() => handleGrantReattempt(sub._id)}
+                        >
+                          Grant Reattempt
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={() => setShowQuizSubmissionsModal(false)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
     </div>
   );
 }
