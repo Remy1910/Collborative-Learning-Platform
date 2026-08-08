@@ -103,7 +103,7 @@ function LoginPage() {
       <div className="cl-left">
         <div className="cl-brand">
           <div className="cl-brand-mark"><IconGrad /></div>
-          <span className="cl-brand-name">Acadexa</span>
+          <span className="cl-brand-name">CampusLink</span>
         </div>
 
         <div className="cl-hero">
