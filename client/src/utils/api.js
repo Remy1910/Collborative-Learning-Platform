@@ -230,3 +230,18 @@ export const quizAPI = {
       body: JSON.stringify(data),
     }),
 };
+
+// ── Notice API ───────────────────────────────────────────────────────────────
+export const noticeAPI = {
+  // Faculty
+  createNotice: (data) =>
+    apiCall("/notices", { method: "POST", body: JSON.stringify(data) }),
+
+  getMyNotices: () => apiCall("/notices/my"),
+
+  deleteNotice: (noticeId) =>
+    apiCall(`/notices/${noticeId}`, { method: "DELETE" }),
+
+  // Student
+  getNotices: () => apiCall("/notices"),
+};
