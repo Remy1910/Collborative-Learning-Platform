@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI } from "../utils/api";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -36,6 +36,9 @@ const IconTrash = () => (
 );
 const IconEdit = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+);
+const IconBell = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
 );
 
 // ── Modal wrapper ──────────────────────────────────────────────────────────
@@ -90,6 +93,13 @@ function FacultyDashboard() {
   const [quizSubmissions, setQuizSubmissions] = useState([]);
   const [quizSubmissionsLoading, setQuizSubmissionsLoading] = useState(false);
 
+  // ── Notices ──
+  const [notices, setNotices] = useState([]);
+  const [showCreateNotice, setShowCreateNotice] = useState(false);
+  const [noticeForm, setNoticeForm] = useState({
+    title: "", message: "", category: "General", dueDate: "", expiryDate: "", courseId: ""
+  });
+
   // Forms
   const [courseForm, setCourseForm] = useState({ title: '', description: '' });
   const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', courseId: '', dueDate: '' });
@@ -103,20 +113,59 @@ function FacultyDashboard() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [qData, cData, sData] = await Promise.all([
+      const [qData, cData, sData, nData] = await Promise.all([
         quizAPI.getMyQuizzes().catch(() => []),
         courseAPI.getCourses().catch(() => []),
         assignmentAPI.getStats().catch(() => ({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0 })),
+        noticeAPI.getMyNotices().catch(() => []),
       ]);
       setQuizzes(Array.isArray(qData) ? qData : []);
       // Only show courses belonging to this faculty
       const userId = localStorage.getItem("userId");
       setCourses(Array.isArray(cData) ? cData.filter(c => !c.faculty?._id || c.faculty?._id === userId || c.faculty === userId) : []);
       setStats(sData || { totalCourses: 0, totalAssignments: 0, totalSubmissions: 0 });
+      setNotices(Array.isArray(nData) ? nData : []);
     } catch (err) {
       setError("Failed to load dashboard data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Post Notice ────────────────────────────────────────────────────────
+  const handleCreateNotice = async () => {
+    if (!noticeForm.title.trim()) { setError("Notice title is required"); return; }
+    if (!noticeForm.message.trim()) { setError("Notice message is required"); return; }
+    try {
+      setLoading(true);
+      await noticeAPI.createNotice({
+        title: noticeForm.title,
+        message: noticeForm.message,
+        category: noticeForm.category,
+        dueDate: noticeForm.dueDate || null,
+        expiryDate: noticeForm.expiryDate || null,
+        courseId: noticeForm.courseId || null,
+      });
+      setShowCreateNotice(false);
+      setNoticeForm({ title: "", message: "", category: "General", dueDate: "", expiryDate: "", courseId: "" });
+      showMsg("Notice posted successfully!");
+      loadAll();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Delete Notice ──────────────────────────────────────────────────────
+  const handleDeleteNotice = async (noticeId) => {
+    if (!window.confirm("Delete this notice?")) return;
+    try {
+      await noticeAPI.deleteNotice(noticeId);
+      showMsg("Notice deleted.");
+      loadAll();
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -288,6 +337,7 @@ function FacultyDashboard() {
           { id: "quizzes", label: "Quizzes", icon: <IconQuiz /> },
           { id: "assignments", label: "Assignments", icon: <IconClip /> },
           { id: "students", label: "Students", icon: <IconUsers /> },
+          { id: "notices", label: "Notices", icon: <IconBell /> },
         ].map(tab => (
           <button
             key={tab.id}
@@ -589,6 +639,54 @@ function FacultyDashboard() {
           </div>
         )}
 
+        {/* ══ NOTICES ═══════════════════════════════════════════════════════ */}
+        {activeTab === "notices" && (
+          <div className="tab-content">
+            <div className="tab-header">
+              <div>
+                <h2>Notice Board</h2>
+                <p className="page-sub">Post announcements, quiz dates, and deadlines for your students</p>
+              </div>
+              <button className="btn-primary" onClick={() => setShowCreateNotice(true)}>
+                <IconPlus /> Post Notice
+              </button>
+            </div>
+
+            {loading ? <Spinner /> : notices.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">📌</div>
+                <h3>No notices yet</h3>
+                <p>Post your first notice to keep students informed</p>
+                <button className="btn-primary" onClick={() => setShowCreateNotice(true)}>
+                  <IconPlus /> Post Notice
+                </button>
+              </div>
+            ) : (
+              <div className="mini-list">
+                {notices.map(n => (
+                  <div key={n._id} className="mini-item" style={{ alignItems: "flex-start" }}>
+                    <div>
+                      <div className="mini-title">{n.title}</div>
+                      <div className="mini-sub" style={{ marginBottom: "0.3rem" }}>
+                        {n.category} • {n.course?.title || "General"}
+                        {n.dueDate ? ` • Due ${new Date(n.dueDate).toLocaleDateString()}` : ""}
+                        {n.expiryDate ? ` • Expires ${new Date(n.expiryDate).toLocaleDateString()}` : ""}
+                      </div>
+                      <p style={{ fontSize: "0.85rem", color: "#475569", margin: 0 }}>{n.message}</p>
+                    </div>
+                    <button
+                      className="btn-small btn-danger"
+                      onClick={() => handleDeleteNotice(n._id)}
+                    >
+                      <IconTrash />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ══ STUDENTS ══════════════════════════════════════════════════════ */}
         {activeTab === "students" && (
           <div className="tab-content">
@@ -843,6 +941,76 @@ function FacultyDashboard() {
               disabled={loading || !assignCourseId}
             >
               {loading ? <Spinner /> : <><IconCheck /> Assign Quiz</>}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Create Notice Modal */}
+      {showCreateNotice && (
+        <Modal title="Post Notice" onClose={() => setShowCreateNotice(false)}>
+          <div className="modal-body">
+            <div className="form-group">
+              <label>Title *</label>
+              <input
+                type="text"
+                placeholder="e.g., Midterm Quiz Schedule"
+                value={noticeForm.title}
+                onChange={e => setNoticeForm(f => ({ ...f, title: e.target.value }))}
+              />
+            </div>
+            <div className="form-group">
+              <label>Message *</label>
+              <textarea
+                placeholder="Details about the notice..."
+                value={noticeForm.message}
+                onChange={e => setNoticeForm(f => ({ ...f, message: e.target.value }))}
+                rows="4"
+              />
+            </div>
+            <div className="form-group">
+              <label>Category</label>
+              <select
+                value={noticeForm.category}
+                onChange={e => setNoticeForm(f => ({ ...f, category: e.target.value }))}
+              >
+                <option value="General">General</option>
+                <option value="Quiz">Quiz</option>
+                <option value="Assignment">Assignment</option>
+                <option value="Announcement">Announcement</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Course (leave blank for a general notice)</label>
+              <select
+                value={noticeForm.courseId}
+                onChange={e => setNoticeForm(f => ({ ...f, courseId: e.target.value }))}
+              >
+                <option value="">— General (all students) —</option>
+                {courses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Due Date (optional)</label>
+              <input
+                type="datetime-local"
+                value={noticeForm.dueDate}
+                onChange={e => setNoticeForm(f => ({ ...f, dueDate: e.target.value }))}
+              />
+            </div>
+            <div className="form-group">
+              <label>Expiry Date (optional — notice hides after this)</label>
+              <input
+                type="datetime-local"
+                value={noticeForm.expiryDate}
+                onChange={e => setNoticeForm(f => ({ ...f, expiryDate: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={() => setShowCreateNotice(false)}>Cancel</button>
+            <button className="btn-primary" onClick={handleCreateNotice} disabled={loading}>
+              {loading ? <><Spinner /> Posting…</> : <><IconCheck /> Post Notice</>}
             </button>
           </div>
         </Modal>

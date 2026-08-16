@@ -12,6 +12,7 @@ const courseRoutes = require("./routes/courseRoutes");
 const assignmentRoutes = require("./routes/assignmentRoutes");
 const quizRoutes = require("./routes/quizRoutes");
 const quizResponseRoutes = require("./routes/quizResponseRoutes");
+const noticeRoutes = require("./routes/noticeRoutes");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -46,6 +47,7 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/quizzes", quizRoutes);
 app.use("/api/quiz-responses", quizResponseRoutes);
+app.use("/api/notices", noticeRoutes);
 
 // Protected test route
 app.get("/api/protected", protect, (req, res) => {
