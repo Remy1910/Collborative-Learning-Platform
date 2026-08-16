@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI } from "../utils/api";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -66,6 +66,7 @@ function StudentDashboard() {
   const [results, setResults] = useState([]);
   const [courses, setCourses] = useState([]);
   const [mySubmissions, setMySubmissions] = useState([]);
+  const [notices, setNotices] = useState([]);
 
   // Loading / alerts
   const [loading, setLoading] = useState(false);
@@ -115,10 +116,11 @@ function StudentDashboard() {
     }
   };
 
-  // Also load results for dashboard quick view
+  // Also load results and notices for dashboard quick view
   useEffect(() => {
     if (activeTab === "dashboard") {
       quizAPI.getMyResults().then(r => setResults(Array.isArray(r) ? r : [])).catch(() => { });
+      noticeAPI.getNotices().then(n => setNotices(Array.isArray(n) ? n : [])).catch(() => { });
     }
   }, [activeTab]);
 
@@ -246,52 +248,90 @@ function StudentDashboard() {
               ))}
             </div>
 
-            <div className="overview-grid">
-              {/* Upcoming quizzes */}
-              <div className="overview-card">
-                <div className="overview-card-header">
-                  <h3>⏳ Upcoming Quizzes</h3>
-                  <button className="btn-link" onClick={() => setActiveTab("my-quizzes")}>View all →</button>
+            {/* Main content + right-side notice board */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "1.5rem", alignItems: "start" }}>
+              <div className="overview-grid">
+                {/* Upcoming quizzes */}
+                <div className="overview-card">
+                  <div className="overview-card-header">
+                    <h3>⏳ Upcoming Quizzes</h3>
+                    <button className="btn-link" onClick={() => setActiveTab("my-quizzes")}>View all →</button>
+                  </div>
+                  {loading ? <Spinner /> : upcomingQuizzes.length === 0 ? (
+                    <div className="empty-mini">🎉 No pending quizzes</div>
+                  ) : (
+                    <div className="mini-list">
+                      {upcomingQuizzes.slice(0, 4).map(q => (
+                        <div key={q._id} className="mini-item">
+                          <div>
+                            <div className="mini-title">{q.title}</div>
+                            <div className="mini-sub">
+                              {q.subject} {q.dueDate ? `• Due ${new Date(q.dueDate).toLocaleDateString()}` : ""}
+                            </div>
+                          </div>
+                          <button className="btn-primary btn-small" onClick={() => navigate(`/quiz/${q._id}/take`)}>
+                            <IconPlay /> Start
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {loading ? <Spinner /> : upcomingQuizzes.length === 0 ? (
-                  <div className="empty-mini">🎉 No pending quizzes</div>
-                ) : (
-                  <div className="mini-list">
-                    {upcomingQuizzes.slice(0, 4).map(q => (
-                      <div key={q._id} className="mini-item">
-                        <div>
-                          <div className="mini-title">{q.title}</div>
-                          <div className="mini-sub">
-                            {q.subject} {q.dueDate ? `• Due ${new Date(q.dueDate).toLocaleDateString()}` : ""}
+
+                {/* Recent scores */}
+                <div className="overview-card">
+                  <div className="overview-card-header">
+                    <h3>📊 Recent Scores</h3>
+                    <button className="btn-link" onClick={() => setActiveTab("results")}>View all →</button>
+                  </div>
+                  {results.length === 0 ? (
+                    <div className="empty-mini">No results yet</div>
+                  ) : (
+                    <div className="mini-list">
+                      {results.slice(0, 4).map(r => (
+                        <div key={r.quizId || r._id} className="mini-item">
+                          <div>
+                            <div className="mini-title">{r.quizTitle}</div>
+                            <div className="mini-sub">{r.subject}</div>
+                          </div>
+                          <div className="score-chip" style={{ background: r.passed ? "#d1fae5" : "#fee2e2", color: r.passed ? "#065f46" : "#7f1d1d" }}>
+                            {r.percentage}%
                           </div>
                         </div>
-                        <button className="btn-primary btn-small" onClick={() => navigate(`/quiz/${q._id}/take`)}>
-                          <IconPlay /> Start
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Recent scores */}
-              <div className="overview-card">
-                <div className="overview-card-header">
-                  <h3>📊 Recent Scores</h3>
-                  <button className="btn-link" onClick={() => setActiveTab("results")}>View all →</button>
+              {/* Notice Board */}
+              <div style={{
+                background: "#fdf6e3",
+                border: "1px solid #e8dcb8",
+                borderRadius: "12px",
+                padding: "1rem 1.1rem",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.06)"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.9rem" }}>
+                  <span style={{ fontSize: "1.1rem" }}>📌</span>
+                  <h3 style={{ margin: 0, fontSize: "1rem", color: "#334155" }}>Notice Board</h3>
                 </div>
-                {results.length === 0 ? (
-                  <div className="empty-mini">No results yet</div>
+
+                {notices.length === 0 ? (
+                  <div className="empty-mini" style={{ fontSize: "0.85rem" }}>No notices right now</div>
                 ) : (
-                  <div className="mini-list">
-                    {results.slice(0, 4).map(r => (
-                      <div key={r.quizId || r._id} className="mini-item">
-                        <div>
-                          <div className="mini-title">{r.quizTitle}</div>
-                          <div className="mini-sub">{r.subject}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem", maxHeight: "420px", overflowY: "auto" }}>
+                    {notices.map(n => (
+                      <div key={n._id} style={{ borderBottom: "1px dashed #e8dcb8", paddingBottom: "0.75rem" }}>
+                        <div style={{ color: "#dc2626", fontWeight: 700, fontSize: "0.88rem", lineHeight: 1.3 }}>
+                          {n.title}
                         </div>
-                        <div className="score-chip" style={{ background: r.passed ? "#d1fae5" : "#fee2e2", color: r.passed ? "#065f46" : "#7f1d1d" }}>
-                          {r.percentage}%
+                        <div style={{ color: "#dc2626", fontSize: "0.8rem", marginTop: "0.2rem" }}>
+                          {n.message}
+                        </div>
+                        <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.3rem" }}>
+                          {n.category} • {n.course?.title || "General"}
+                          {n.dueDate ? ` • Due ${new Date(n.dueDate).toLocaleDateString()}` : ""}
                         </div>
                       </div>
                     ))}
