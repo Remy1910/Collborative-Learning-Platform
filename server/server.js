@@ -20,9 +20,20 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(mongoSanitize());
 
-// CORS — reads CLIENT_URL from env in production, falls back to localhost in dev
+// CORS — reads CLIENT_URLS (comma-separated) from env in production, falls back to localhost in dev
+const allowedOrigins = process.env.CLIENT_URLS
+  ? process.env.CLIENT_URLS.split(",").map(url => url.trim())
+  : ["http://localhost:5173"];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  origin: function (origin, callback) {
+    // Allow requests with no origin (e.g. curl, mobile apps, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
 }));
