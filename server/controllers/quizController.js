@@ -2,14 +2,25 @@ const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
 const User = require("../models/User");
 const QuizResponse = require("../models/QuizResponse");
+const Course = require("../models/Course");
 
 // Faculty creates a new quiz
 const createQuiz = async (req, res) => {
   try {
-    const { title, subject, description, duration, dueDate, totalMarks, passMarks } = req.body;
+    const { title, subject, description, duration, dueDate, totalMarks, passMarks, courseId } = req.body;
 
     if (!title || !subject) {
       return res.status(400).json({ message: "Title and subject are required" });
+    }
+
+    if (courseId) {
+      const course = await Course.findById(courseId);
+      if (!course) {
+        return res.status(404).json({ message: "Course not found" });
+      }
+      if (course.faculty.toString() !== req.user.id) {
+        return res.status(403).json({ message: "You are not authorized to use this course" });
+      }
     }
 
     const quiz = await Quiz.create({
@@ -20,6 +31,7 @@ const createQuiz = async (req, res) => {
       dueDate,
       totalMarks: totalMarks || 100,
       passMarks: passMarks || 40,
+      course: courseId || undefined,
       createdBy: req.user.id,
       status: "draft"
     });
@@ -94,11 +106,33 @@ const getQuizById = async (req, res) => {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
+    if (req.user.role === "faculty" && quiz.createdBy._id.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (req.user.role === "student" && (
+      !quiz.isPublished || !quiz.assignedTo.some(assigned =>
+        (assigned._id || assigned).toString() === req.user.id
+      )
+    )) {
+      return res.status(403).json({ message: "This quiz is not assigned to you" });
+    }
+
     const questions = await Question.find({ quiz: quizId, isDeleted: false }).sort({ order: 1 });
+
+    const visibleQuestions = req.user.role === "student"
+      ? questions.map(question => {
+        const visible = question.toObject();
+        if (visible.options) visible.options = visible.options.map(option => ({ text: option.text }));
+        delete visible.correctAnswer;
+        delete visible.modelAnswer;
+        return visible;
+      })
+      : questions;
 
     res.json({
       ...quiz.toObject(),
-      questions
+      questions: visibleQuestions
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -296,8 +330,8 @@ const updateQuestion = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const question = await Question.findByIdAndUpdate(
-      questionId,
+    const question = await Question.findOneAndUpdate(
+      { _id: questionId, quiz: quizId },
       { type, questionText, marks, options, correctAnswer, modelAnswer },
       { new: true, runValidators: true }
     );
@@ -322,8 +356,8 @@ const deleteQuestion = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const question = await Question.findByIdAndUpdate(
-      questionId,
+    const question = await Question.findOneAndUpdate(
+      { _id: questionId, quiz: quizId },
       { isDeleted: true },
       { new: true }
     );

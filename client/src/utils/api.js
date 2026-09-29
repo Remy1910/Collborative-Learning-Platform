@@ -1,6 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
-  : "http://localhost:5001/api";
+  : "http://localhost:5000/api";
 
 
 console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
@@ -128,8 +128,22 @@ export const assignmentAPI = {
   submitAssignment: (data) =>
     apiCall("/assignments/submit", { method: "POST", body: JSON.stringify(data) }),
 
+  submitAssignmentWithFile: async (data) => {
+    const response = await fetch(`${API_BASE_URL}/assignments/submit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      body: data,
+    });
+    const json = await response.json().catch(() => ({ message: "Network error" }));
+    if (!response.ok) throw new Error(json.message || "Assignment submission failed");
+    return json;
+  },
+
   // Student: view own submissions
   getMySubmissions: () => apiCall("/assignments/my-submissions"),
+
+  // Student: view assignments for enrolled courses
+  getAvailableAssignments: () => apiCall("/assignments/available"),
 };
 
 // ── Quiz API ─────────────────────────────────────────────────────────────────
@@ -211,12 +225,6 @@ export const quizAPI = {
     apiCall(`/quiz-responses/${quizId}/my-response`),
 
   getMyResults: () => apiCall("/quiz-responses/student/my-results"),
-
-  logViolation: (responseId, data) =>
-    apiCall(`/quiz-responses/${responseId}/violation`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
 
   logViolation: (responseId, data) =>
     apiCall(`/quiz-responses/${responseId}/violation`, {

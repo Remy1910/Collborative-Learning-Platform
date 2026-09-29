@@ -65,6 +65,7 @@ function StudentDashboard() {
   const [quizzes, setQuizzes] = useState([]);
   const [results, setResults] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [mySubmissions, setMySubmissions] = useState([]);
   const [notices, setNotices] = useState([]);
 
@@ -79,6 +80,7 @@ function StudentDashboard() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [submitContent, setSubmitContent] = useState("");
+  const [submitFile, setSubmitFile] = useState(null);
   const [enrolling, setEnrolling] = useState(false);
 
   useEffect(() => { loadTabData(); }, [activeTab]);
@@ -102,11 +104,13 @@ function StudentDashboard() {
         setCourses(Array.isArray(c) ? c : []);
       }
       if (activeTab === "assignments") {
-        const [q, s] = await Promise.all([
+        const [q, a, s] = await Promise.all([
           quizAPI.getAssignedQuizzes().catch(() => []),
+          assignmentAPI.getAvailableAssignments().catch(() => []),
           assignmentAPI.getMySubmissions().catch(() => []),
         ]);
         setQuizzes(Array.isArray(q) ? q : []);
+        setAssignments(Array.isArray(a) ? a : []);
         setMySubmissions(Array.isArray(s) ? s : []);
       }
     } catch (err) {
@@ -141,13 +145,18 @@ function StudentDashboard() {
   };
 
   const handleSubmitAssignment = async () => {
-    if (!submitContent.trim()) { setError("Please enter your submission content"); return; }
+    if (!submitContent.trim() && !submitFile) { setError("Add written content or attach a file"); return; }
     try {
       setLoading(true);
-      await assignmentAPI.submitAssignment({ assignmentId: selectedAssignment._id, content: submitContent });
+      const formData = new FormData();
+      formData.append("assignmentId", selectedAssignment._id);
+      formData.append("content", submitContent);
+      if (submitFile) formData.append("file", submitFile);
+      await assignmentAPI.submitAssignmentWithFile(formData);
       showMsg("Assignment submitted successfully!");
       setShowSubmitModal(false);
       setSubmitContent("");
+      setSubmitFile(null);
       loadTabData();
     } catch (err) {
       setError(err.message);
@@ -513,40 +522,43 @@ function StudentDashboard() {
               <p className="page-sub">Submit your assignments and track your grades</p>
             </div>
 
-            {loading ? <Spinner /> : mySubmissions.length === 0 ? (
+            {loading ? <Spinner /> : assignments.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">📋</div>
-                <h3>No assignments yet</h3>
-                <p>Your instructor hasn't assigned any assignments yet. Enroll in courses to see assignments.</p>
+                <h3>No assignments available</h3>
+                <p>Enroll in a course to see its assignments here.</p>
               </div>
             ) : (
               <div className="assignment-list-student">
-                {mySubmissions.map(sub => (
-                  <div key={sub._id} className="assignment-card-student">
+                {assignments.map(assignment => {
+                  const submission = mySubmissions.find(sub => sub.assignment?._id === assignment._id);
+                  return <div key={assignment._id} className="assignment-card-student">
                     <div className="assignment-left">
                       <div className="assignment-icon">📋</div>
                       <div>
-                        <h4>{sub.assignment?.title || "Assignment"}</h4>
-                        <p className="assignment-course">{sub.assignment?.course?.title || ""}</p>
-                        <p className="assignment-date">
-                          Submitted: {new Date(sub.createdAt).toLocaleDateString()}
-                        </p>
+                        <h4>{assignment.title}</h4>
+                        <p className="assignment-course">{assignment.course?.title || ""}</p>
+                        <p className="assignment-date">{assignment.dueDate ? `Due: ${new Date(assignment.dueDate).toLocaleDateString()}` : "No due date"}</p>
                       </div>
                     </div>
                     <div className="assignment-right">
-                      {sub.marks !== null && sub.marks !== undefined ? (
+                      {!submission ? (
+                        <button className="btn-primary" onClick={() => { setSelectedAssignment(assignment); setShowSubmitModal(true); }}>
+                          Submit
+                        </button>
+                      ) : submission.marks !== null && submission.marks !== undefined ? (
                         <div className="grade-display">
-                          <div className="grade-num">{sub.marks}<span>/100</span></div>
-                          <div className={`grade-label ${sub.marks >= 40 ? "pass" : "fail"}`}>
-                            {sub.marks >= 40 ? "Passed" : "Failed"}
+                          <div className="grade-num">{submission.marks}<span>/100</span></div>
+                          <div className={`grade-label ${submission.marks >= 40 ? "pass" : "fail"}`}>
+                            {submission.marks >= 40 ? "Passed" : "Failed"}
                           </div>
                         </div>
                       ) : (
                         <span className="badge badge-warning">Awaiting Grade</span>
                       )}
                     </div>
-                  </div>
-                ))}
+                  </div>;
+                })}
               </div>
             )}
           </div>
@@ -643,7 +655,7 @@ function StudentDashboard() {
               </div>
             )}
             <div className="form-group">
-              <label>Your Answer / Work *</label>
+              <label>Your Answer / Work</label>
               <textarea
                 placeholder="Type your submission here..."
                 value={submitContent}
@@ -651,6 +663,16 @@ function StudentDashboard() {
                 rows="10"
                 style={{ width: "100%", resize: "vertical" }}
               />
+            </div>
+            <div className="form-group">
+              <label htmlFor="assignment-file">Attach a file</label>
+              <input
+                id="assignment-file"
+                type="file"
+                onChange={e => setSubmitFile(e.target.files?.[0] || null)}
+              />
+              <small>Optional. Maximum size: 10 MB.</small>
+              {submitFile && <small>{submitFile.name}</small>}
             </div>
           </div>
           <div className="modal-actions">

@@ -833,6 +833,15 @@ function FacultyDashboard() {
                     <div className="submission-info">
                       <div className="student-name">{sub.student?.name || "Student"}</div>
                       <div className="submission-content">{sub.content?.slice(0, 120)}…</div>
+                      {sub.file?.storedName && (
+                        <a
+                          href={`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/uploads/${sub.file.storedName}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open attachment: {sub.file.originalName}
+                        </a>
+                      )}
                     </div>
                     <div className="submission-right">
                       {sub.marks !== null && sub.marks !== undefined ? (
@@ -869,6 +878,17 @@ function FacultyDashboard() {
               <label>Submission Content</label>
               <div className="submission-text">{selectedSubmission.content}</div>
             </div>
+            {selectedSubmission.file?.storedName && (
+              <p>
+                <a
+                  href={`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/uploads/${selectedSubmission.file.storedName}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open attachment: {selectedSubmission.file.originalName}
+                </a>
+              </p>
+            )}
             <div className="form-group" style={{ marginTop: "1.5rem" }}>
               <label>Marks (0–100) *</label>
               <input

@@ -70,8 +70,8 @@ const submitAssignment = async (req, res) => {
     }
 
     // Validate content
-    if (!content || typeof content !== "string" || content.trim().length === 0) {
-      return res.status(400).json({ message: "Submission content is required" });
+    if ((!content || typeof content !== "string" || content.trim().length === 0) && !req.file) {
+      return res.status(400).json({ message: "Add written content or attach a file" });
     }
 
     if (content.length > 50000) {
@@ -104,7 +104,13 @@ const submitAssignment = async (req, res) => {
     const submission = await Submission.create({
       assignment: assignmentId,
       student: req.user.id,
-      content: content.trim()
+      content: typeof content === "string" ? content.trim() : "",
+      file: req.file ? {
+        originalName: req.file.originalname,
+        storedName: req.file.filename,
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      } : undefined
     });
 
     res.status(201).json({
@@ -210,6 +216,31 @@ const getMySubmissions = async (req, res) => {
   }
 };
 
+// Student views assignments for courses they are enrolled in.
+const getAvailableAssignments = async (req, res) => {
+  try {
+    const courses = await Course.find({ students: req.user.id }).select("_id");
+    const assignments = await Assignment.find({
+      course: { $in: courses.map(course => course._id) }
+    })
+      .populate("course", "title")
+      .sort({ dueDate: 1, createdAt: -1 });
+
+    const submissions = await Submission.find({
+      student: req.user.id,
+      assignment: { $in: assignments.map(assignment => assignment._id) }
+    }).select("assignment");
+    const submittedIds = new Set(submissions.map(submission => submission.assignment.toString()));
+
+    res.json(assignments.map(assignment => ({
+      ...assignment.toObject(),
+      submitted: submittedIds.has(assignment._id.toString())
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const getFacultyStats = async (req, res) => {
   try {
     const courses = await Course.find({ faculty: req.user.id });
@@ -237,4 +268,12 @@ const getFacultyStats = async (req, res) => {
 
 
 
-module.exports = { createAssignment, submitAssignment, giveMarks, viewSubmissions, getMySubmissions, getFacultyStats };
+module.exports = {
+  createAssignment,
+  submitAssignment,
+  giveMarks,
+  viewSubmissions,
+  getMySubmissions,
+  getAvailableAssignments,
+  getFacultyStats
+};

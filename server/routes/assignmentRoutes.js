@@ -4,6 +4,7 @@ const router = express.Router();
 
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
+const assignmentUpload = require("../middleware/assignmentUpload");
 
 const {
   createAssignment,
@@ -11,6 +12,7 @@ const {
   giveMarks,
   viewSubmissions,
   getMySubmissions,
+  getAvailableAssignments,
   getFacultyStats
 } = require("../controllers/assignmentController");
 
@@ -18,7 +20,7 @@ const {
 router.post("/create", protect, authorizeRoles("faculty"), createAssignment);
 
 // Student only
-router.post("/submit", protect, authorizeRoles("student"), submitAssignment);
+router.post("/submit", protect, authorizeRoles("student"), assignmentUpload.single("file"), submitAssignment);
 
 // Faculty gives marks
 router.post("/mark", protect, authorizeRoles("faculty"), giveMarks);
@@ -30,6 +32,7 @@ router.get("/stats", protect, authorizeRoles("faculty"), getFacultyStats);
 router.get("/:assignmentId/submissions",protect,authorizeRoles("faculty"),viewSubmissions);
 
 // Student dashboard
+router.get("/available", protect, authorizeRoles("student"), getAvailableAssignments);
 router.get("/my-submissions", protect, authorizeRoles("student"), getMySubmissions);
 
 

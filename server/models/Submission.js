@@ -15,6 +15,12 @@ const submissionSchema = new mongoose.Schema(
     content: {
       type: String
     },
+    file: {
+      originalName: String,
+      storedName: String,
+      mimeType: String,
+      size: Number
+    },
     marks: {
       type: Number,
       default: null
