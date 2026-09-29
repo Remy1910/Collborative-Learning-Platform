@@ -258,6 +258,28 @@ const getSubmissionFile = async (req, res) => {
   }
 };
 
+// Backward-compatible handler for links created before attachments moved to MongoDB.
+const getLegacySubmissionFile = async (req, res) => {
+  try {
+    const submission = await Submission.findOne({ "file.storedName": req.params.storedName })
+      .select("file +file.data");
+
+    if (!submission?.file) {
+      return res.status(404).json({ message: "Attachment not found" });
+    }
+
+    res.setHeader("Content-Type", submission.file.mimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(submission.file.originalName)}"`);
+    if (submission.file.data) return res.send(submission.file.data);
+
+    const legacyPath = path.join(__dirname, "..", "uploads", submission.file.storedName);
+    if (fs.existsSync(legacyPath)) return res.sendFile(legacyPath);
+    return res.status(404).json({ message: "Attachment is no longer available" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Student views own submissions
 const getMySubmissions = async (req, res) => {
   try {
@@ -352,5 +374,6 @@ module.exports = {
   getAvailableAssignments,
   getFacultyAssignments,
   getSubmissionFile,
+  getLegacySubmissionFile,
   getFacultyStats
 };

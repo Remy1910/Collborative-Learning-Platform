@@ -4,7 +4,6 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const mongoSanitize = require("express-mongo-sanitize");
-const path = require("path");
 require("dotenv").config();
 
 const authRoutes = require("./routes/authRoutes");
@@ -14,6 +13,7 @@ const assignmentRoutes = require("./routes/assignmentRoutes");
 const quizRoutes = require("./routes/quizRoutes");
 const quizResponseRoutes = require("./routes/quizResponseRoutes");
 const noticeRoutes = require("./routes/noticeRoutes");
+const { getLegacySubmissionFile } = require("./controllers/assignmentController");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -40,7 +40,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.get("/uploads/:storedName", getLegacySubmissionFile);
 
 // Rate limiting on auth routes only
 const authLimiter = rateLimit({
