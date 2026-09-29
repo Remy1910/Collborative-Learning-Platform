@@ -13,6 +13,7 @@ const {
   viewSubmissions,
   getMySubmissions,
   getAvailableAssignments,
+  getFacultyAssignments,
   getFacultyStats
 } = require("../controllers/assignmentController");
 
@@ -30,6 +31,9 @@ router.get("/stats", protect, authorizeRoles("faculty"), getFacultyStats);
 
 // Faculty view submissions
 router.get("/:assignmentId/submissions",protect,authorizeRoles("faculty"),viewSubmissions);
+
+// Faculty dashboard assignments for one of their courses
+router.get("/course/:courseId", protect, authorizeRoles("faculty"), getFacultyAssignments);
 
 // Student dashboard
 router.get("/available", protect, authorizeRoles("student"), getAvailableAssignments);

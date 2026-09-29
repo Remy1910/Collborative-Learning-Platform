@@ -117,6 +117,9 @@ export const assignmentAPI = {
   getSubmissions: (assignmentId) =>
     apiCall(`/assignments/${assignmentId}/submissions`),
 
+  // Faculty: view assignments in one of their courses
+  getFacultyAssignments: (courseId) => apiCall(`/assignments/course/${courseId}`),
+
   // Faculty: grade a submission
   gradeSubmission: (data) =>
     apiCall("/assignments/mark", { method: "POST", body: JSON.stringify(data) }),

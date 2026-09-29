@@ -241,6 +241,24 @@ const getAvailableAssignments = async (req, res) => {
   }
 };
 
+// Faculty views assignments belonging to one of their courses.
+const getFacultyAssignments = async (req, res) => {
+  try {
+    const course = await Course.findOne({ _id: req.params.courseId, faculty: req.user.id });
+    if (!course) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+
+    const assignments = await Assignment.find({ course: course._id })
+      .populate("course", "title")
+      .sort({ dueDate: 1, createdAt: -1 });
+
+    res.json(assignments);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const getFacultyStats = async (req, res) => {
   try {
     const courses = await Course.find({ faculty: req.user.id });
@@ -275,5 +293,6 @@ module.exports = {
   viewSubmissions,
   getMySubmissions,
   getAvailableAssignments,
+  getFacultyAssignments,
   getFacultyStats
 };

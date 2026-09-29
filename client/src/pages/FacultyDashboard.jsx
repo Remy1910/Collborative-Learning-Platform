@@ -1099,20 +1099,46 @@ function AssignmentList({ courseId, onViewSubmissions }) {
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // We load all assignments — the API doesn't filter by course currently
-  // so we show a placeholder note
   useEffect(() => {
-    setLoading(false);
-    setAssignments([]);
+    let active = true;
+    setLoading(true);
+    assignmentAPI.getFacultyAssignments(courseId)
+      .then(data => {
+        if (active) setAssignments(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (active) setAssignments([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => { active = false; };
   }, [courseId]);
 
   if (loading) return <div style={{ padding: "1rem" }}><div className="spinner-ring" /></div>;
 
-  return (
-    <div className="assignment-list-empty">
-      <p className="text-muted small">Use "Add Assignment" above to create assignments for this course. They will appear here.</p>
-    </div>
-  );
+  if (assignments.length === 0) {
+    return <div className="assignment-list-empty">
+      <p className="text-muted small">No assignments have been created for this course yet.</p>
+    </div>;
+  }
+
+  return <div className="assignment-list">
+    {assignments.map(assignment => (
+      <div key={assignment._id} className="assignment-row">
+        <div>
+          <strong>{assignment.title}</strong>
+          <div className="text-muted small">
+            {assignment.dueDate ? `Due: ${new Date(assignment.dueDate).toLocaleDateString()}` : "No due date"}
+          </div>
+        </div>
+        <button className="btn-secondary btn-small" onClick={() => onViewSubmissions(assignment)}>
+          View Submissions
+        </button>
+      </div>
+    ))}
+  </div>;
 }
 
 export default FacultyDashboard;
