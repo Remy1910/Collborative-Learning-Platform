@@ -1,6 +1,7 @@
 const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
 const Course = require("../models/Course");
+const User = require("../models/User");
 const { validateTitle, validateDueDate } = require("../utils/validation");
 
 
@@ -190,11 +191,31 @@ const viewSubmissions = async (req, res) => {
       return res.status(403).json({ message: "You are not authorized to view submissions for this assignment" });
     }
 
-    const submissions = await Submission.find({ assignment: assignmentId })
+    const [students, submissions] = await Promise.all([
+      User.find({ _id: { $in: course.students } }).select("name email"),
+      Submission.find({ assignment: assignmentId })
       .populate("student", "name email")
-      .populate("assignment", "title");
+      .populate("assignment", "title")
+    ]);
 
-    res.json(submissions);
+    const submissionsByStudent = new Map(
+      submissions.map(submission => [submission.student._id.toString(), submission])
+    );
+    const submissionRows = students.map(student => {
+      const submission = submissionsByStudent.get(student._id.toString());
+      if (submission) return submission;
+
+      return {
+        _id: `pending-${student._id}`,
+        student,
+        status: "not_submitted",
+        marks: null,
+        content: "",
+        file: null
+      };
+    });
+
+    res.json(submissionRows);
 
   } catch (error) {
     res.status(500).json({ error: error.message });

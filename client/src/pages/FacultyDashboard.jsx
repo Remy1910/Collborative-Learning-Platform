@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, getUploadUrl } from "../utils/api";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -825,17 +825,21 @@ function FacultyDashboard() {
         >
           <div className="modal-body">
             {submissions.length === 0 ? (
-              <div className="empty-mini">No submissions yet.</div>
+              <div className="empty-mini">No students are enrolled in this course.</div>
             ) : (
               <div className="submissions-list">
                 {submissions.map(sub => (
                   <div key={sub._id} className="submission-item">
                     <div className="submission-info">
                       <div className="student-name">{sub.student?.name || "Student"}</div>
-                      <div className="submission-content">{sub.content?.slice(0, 120)}…</div>
+                      {sub.status === "not_submitted" ? (
+                        <div className="submission-content">Not submitted</div>
+                      ) : (
+                        <div className="submission-content">{sub.content?.slice(0, 120)}{sub.content ? "…" : "No written content"}</div>
+                      )}
                       {sub.file?.storedName && (
                         <a
-                          href={`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/uploads/${sub.file.storedName}`}
+                          href={getUploadUrl(sub.file.storedName)}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -844,7 +848,9 @@ function FacultyDashboard() {
                       )}
                     </div>
                     <div className="submission-right">
-                      {sub.marks !== null && sub.marks !== undefined ? (
+                      {sub.status === "not_submitted" ? (
+                        <span className="badge badge-warning">Not submitted</span>
+                      ) : sub.marks !== null && sub.marks !== undefined ? (
                         <span className="marks-badge">{sub.marks}/100</span>
                       ) : (
                         <button
@@ -881,7 +887,7 @@ function FacultyDashboard() {
             {selectedSubmission.file?.storedName && (
               <p>
                 <a
-                  href={`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/uploads/${selectedSubmission.file.storedName}`}
+                  href={getUploadUrl(selectedSubmission.file.storedName)}
                   target="_blank"
                   rel="noreferrer"
                 >

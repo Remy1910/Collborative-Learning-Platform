@@ -2,6 +2,9 @@ const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : "http://localhost:5000/api";
 
+export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
+export const getUploadUrl = (storedName) => `${API_ORIGIN}/uploads/${storedName}`;
+
 
 console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
 console.log("API_BASE_URL:", API_BASE_URL);
