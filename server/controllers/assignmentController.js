@@ -2,6 +2,8 @@ const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
 const Course = require("../models/Course");
 const User = require("../models/User");
+const fs = require("fs");
+const path = require("path");
 const { validateTitle, validateDueDate } = require("../utils/validation");
 
 
@@ -108,9 +110,9 @@ const submitAssignment = async (req, res) => {
       content: typeof content === "string" ? content.trim() : "",
       file: req.file ? {
         originalName: req.file.originalname,
-        storedName: req.file.filename,
         mimeType: req.file.mimetype,
-        size: req.file.size
+        size: req.file.size,
+        data: req.file.buffer
       } : undefined
     });
 
@@ -222,6 +224,40 @@ const viewSubmissions = async (req, res) => {
   }
 };
 
+// Authenticated download for an assignment attachment.
+const getSubmissionFile = async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.submissionId)
+      .select("assignment student file +file.data")
+      .populate({ path: "assignment", populate: { path: "course", select: "faculty" } });
+
+    if (!submission || !submission.file) {
+      return res.status(404).json({ message: "Attachment not found" });
+    }
+
+    const isStudent = submission.student.toString() === req.user.id;
+    const isFaculty = submission.assignment?.course?.faculty?.toString() === req.user.id;
+    if (!isStudent && !isFaculty) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    res.setHeader("Content-Type", submission.file.mimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(submission.file.originalName)}"`);
+    if (submission.file.data) {
+      return res.send(submission.file.data);
+    }
+
+    if (submission.file.storedName) {
+      const legacyPath = path.join(__dirname, "..", "uploads", submission.file.storedName);
+      if (fs.existsSync(legacyPath)) return res.sendFile(legacyPath);
+    }
+
+    return res.status(404).json({ message: "Attachment is no longer available" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Student views own submissions
 const getMySubmissions = async (req, res) => {
   try {
@@ -315,5 +351,6 @@ module.exports = {
   getMySubmissions,
   getAvailableAssignments,
   getFacultyAssignments,
+  getSubmissionFile,
   getFacultyStats
 };

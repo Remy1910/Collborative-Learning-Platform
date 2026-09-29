@@ -19,7 +19,8 @@ const submissionSchema = new mongoose.Schema(
       originalName: String,
       storedName: String,
       mimeType: String,
-      size: Number
+      size: Number,
+      data: { type: Buffer, select: false }
     },
     marks: {
       type: Number,

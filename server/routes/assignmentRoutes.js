@@ -14,6 +14,7 @@ const {
   getMySubmissions,
   getAvailableAssignments,
   getFacultyAssignments,
+  getSubmissionFile,
   getFacultyStats
 } = require("../controllers/assignmentController");
 
@@ -31,6 +32,9 @@ router.get("/stats", protect, authorizeRoles("faculty"), getFacultyStats);
 
 // Faculty view submissions
 router.get("/:assignmentId/submissions",protect,authorizeRoles("faculty"),viewSubmissions);
+
+// Student or owning faculty downloads a submitted attachment
+router.get("/files/:submissionId", protect, getSubmissionFile);
 
 // Faculty dashboard assignments for one of their courses
 router.get("/course/:courseId", protect, authorizeRoles("faculty"), getFacultyAssignments);

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, getUploadUrl } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, getSubmissionFile } from "../utils/api";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -226,6 +226,17 @@ function FacultyDashboard() {
       showMsg("Marks assigned successfully!");
       handleViewSubmissions(selectedAssignment);
     } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleOpenAttachment = async (submissionId) => {
+    const attachmentWindow = window.open("about:blank", "_blank");
+    try {
+      const blob = await getSubmissionFile(submissionId);
+      attachmentWindow.location.href = URL.createObjectURL(blob);
+    } catch (err) {
+      attachmentWindow.close();
       setError(err.message);
     }
   };
@@ -837,14 +848,10 @@ function FacultyDashboard() {
                       ) : (
                         <div className="submission-content">{sub.content?.slice(0, 120)}{sub.content ? "…" : "No written content"}</div>
                       )}
-                      {sub.file?.storedName && (
-                        <a
-                          href={getUploadUrl(sub.file.storedName)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
+                      {sub.file?.originalName && (
+                        <button type="button" className="btn-link" onClick={() => handleOpenAttachment(sub._id)}>
                           Open attachment: {sub.file.originalName}
-                        </a>
+                        </button>
                       )}
                     </div>
                     <div className="submission-right">
@@ -884,15 +891,11 @@ function FacultyDashboard() {
               <label>Submission Content</label>
               <div className="submission-text">{selectedSubmission.content}</div>
             </div>
-            {selectedSubmission.file?.storedName && (
+            {selectedSubmission.file?.originalName && (
               <p>
-                <a
-                  href={getUploadUrl(selectedSubmission.file.storedName)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <button type="button" className="btn-link" onClick={() => handleOpenAttachment(selectedSubmission._id)}>
                   Open attachment: {selectedSubmission.file.originalName}
-                </a>
+                </button>
               </p>
             )}
             <div className="form-group" style={{ marginTop: "1.5rem" }}>

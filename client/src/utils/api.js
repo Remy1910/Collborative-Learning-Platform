@@ -3,7 +3,13 @@ const API_BASE_URL = import.meta.env.VITE_API_URL
   : "http://localhost:5000/api";
 
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
-export const getUploadUrl = (storedName) => `${API_ORIGIN}/uploads/${storedName}`;
+export const getSubmissionFile = async (submissionId) => {
+  const response = await fetch(`${API_BASE_URL}/assignments/files/${submissionId}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+  });
+  if (!response.ok) throw new Error("Unable to open attachment");
+  return response.blob();
+};
 
 
 console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
