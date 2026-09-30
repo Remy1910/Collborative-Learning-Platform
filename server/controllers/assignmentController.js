@@ -224,6 +224,12 @@ const viewSubmissions = async (req, res) => {
   }
 };
 
+// Browsers can render these inline; everything else (docx, xlsx, zip, etc.)
+// gets forced as a real download, since an "inline" header for a type the
+// browser can't display just opens a blank tab with nothing visible.
+const INLINE_RENDERABLE_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"];
+const dispositionFor = (mimeType) => (INLINE_RENDERABLE_TYPES.includes(mimeType) ? "inline" : "attachment");
+
 // Authenticated download for an assignment attachment.
 const getSubmissionFile = async (req, res) => {
   try {
@@ -242,7 +248,7 @@ const getSubmissionFile = async (req, res) => {
     }
 
     res.setHeader("Content-Type", submission.file.mimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(submission.file.originalName)}"`);
+    res.setHeader("Content-Disposition", `${dispositionFor(submission.file.mimeType)}; filename="${encodeURIComponent(submission.file.originalName)}"`);
     if (submission.file.data) {
       return res.send(submission.file.data);
     }
@@ -269,7 +275,7 @@ const getLegacySubmissionFile = async (req, res) => {
     }
 
     res.setHeader("Content-Type", submission.file.mimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(submission.file.originalName)}"`);
+    res.setHeader("Content-Disposition", `${dispositionFor(submission.file.mimeType)}; filename="${encodeURIComponent(submission.file.originalName)}"`);
     if (submission.file.data) return res.send(submission.file.data);
 
     const legacyPath = path.join(__dirname, "..", "uploads", submission.file.storedName);
