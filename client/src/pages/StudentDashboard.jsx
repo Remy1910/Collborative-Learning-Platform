@@ -77,7 +77,6 @@ function StudentDashboard() {
   const [success, setSuccess] = useState("");
 
   // Modals
-  const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
@@ -86,7 +85,8 @@ function StudentDashboard() {
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [enrolling, setEnrolling] = useState(false);
+  // Id of the course currently being enrolled in (only that card shows a spinner)
+  const [enrollingId, setEnrollingId] = useState(null);
 
   useEffect(() => { loadTabData(); }, [activeTab]);
 
@@ -145,19 +145,18 @@ function StudentDashboard() {
     }
   }, [activeTab]);
 
-  const handleEnroll = async (courseId) => {
-    setEnrolling(true);
+  const handleEnroll = async (course) => {
+    setEnrollingId(course._id);
     try {
-      await courseAPI.enrollCourse(courseId);
-      showMsg("Successfully enrolled in course!");
-      setShowEnrollModal(false);
+      await courseAPI.enrollCourse(course._id);
+      showMsg(`Enrolled in "${course.title}"! Its quizzes and assignments will now appear in your dashboard.`);
       // Refresh courses
       const c = await courseAPI.getCourses().catch(() => []);
       setCourses(Array.isArray(c) ? c : []);
     } catch (err) {
       setError(err.message);
     } finally {
-      setEnrolling(false);
+      setEnrollingId(null);
     }
   };
 
@@ -449,7 +448,7 @@ function StudentDashboard() {
                         <div className="course-stats">
                           <div className="course-stat">
                             <span className="course-stat-num">{c.studentCount || 0}</span>
-                            <span className="course-stat-lbl">Peers</span>
+                            <span className="course-stat-lbl">{c.studentCount === 1 ? "Student" : "Students"}</span>
                           </div>
                           <div className="course-stat">
                             <span className="course-stat-num">{c.faculty?.name || "Faculty"}</span>
@@ -491,10 +490,10 @@ function StudentDashboard() {
                           <button
                             className="btn-primary"
                             style={{ width: "100%" }}
-                            onClick={() => handleEnroll(c._id)}
-                            disabled={enrolling}
+                            onClick={() => handleEnroll(c)}
+                            disabled={Boolean(enrollingId)}
                           >
-                            {enrolling ? <Spinner /> : "Enroll Now"}
+                            {enrollingId === c._id ? <Spinner /> : "Enroll Now"}
                           </button>
                         </div>
                       </div>
