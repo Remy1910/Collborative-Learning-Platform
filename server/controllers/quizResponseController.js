@@ -1,7 +1,56 @@
 const QuizResponse = require("../models/QuizResponse");
 const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
-const User = require("../models/User");
+
+const MAX_VIOLATIONS = 3;
+// Allowance for network latency between the client timer hitting zero and its auto-submit/save arriving
+const DURATION_GRACE_SECONDS = 30;
+const FINISHED_STATUSES = ["submitted", "graded", "terminated"];
+
+const elapsedSeconds = (response) =>
+  Math.round((Date.now() - new Date(response.startedAt).getTime()) / 1000);
+
+const isPastTimeLimit = (response, quiz) =>
+  Boolean(quiz?.duration) && elapsedSeconds(response) > quiz.duration * 60 + DURATION_GRACE_SECONDS;
+
+const percentageOf = (score, total) =>
+  total > 0 ? Number(((score / total) * 100).toFixed(2)) : 0;
+
+// Totals up the attempt and closes it with the given status
+const finalizeResponse = (response, quiz, status) => {
+  const totalMarks = response.responses.reduce((sum, r) => sum + (r.marksObtained || 0), 0);
+  const elapsed = elapsedSeconds(response);
+
+  response.totalMarksObtained = totalMarks;
+  response.status = status;
+  response.submittedAt = new Date();
+  response.timeSpent = quiz?.duration ? Math.min(elapsed, quiz.duration * 60) : elapsed;
+  response.isPassed = quiz ? totalMarks >= quiz.passMarks : false;
+};
+
+// Questions as a student may see them — no answer key
+const toStudentQuestion = (q) => ({
+  _id: q._id,
+  type: q.type,
+  questionText: q.questionText,
+  marks: q.marks,
+  options: (q.options || []).map(o => ({ text: o.text })),
+  order: q.order
+});
+
+// An in-progress attempt without per-answer grading, so students can't probe correctness mid-quiz
+const toStudentInProgressResponse = (response) => {
+  const obj = response.toObject();
+  obj.responses = obj.responses.map(({ question, studentAnswer }) => ({ question, studentAnswer }));
+  delete obj.totalMarksObtained;
+  delete obj.isPassed;
+  return obj;
+};
+
+const loadStudentQuestions = async (quizId) => {
+  const questions = await Question.find({ quiz: quizId, isDeleted: false }).sort({ order: 1 });
+  return questions.map(toStudentQuestion);
+};
 
 // Student starts a quiz
 const startQuiz = async (req, res) => {
@@ -9,7 +58,7 @@ const startQuiz = async (req, res) => {
     const { quizId } = req.params;
 
     const quiz = await Quiz.findById(quizId);
-    if (!quiz || !quiz.isPublished) {
+    if (!quiz || !quiz.isPublished || quiz.isDeleted) {
       return res.status(404).json({ message: "Quiz not found or not published" });
     }
 
@@ -25,59 +74,71 @@ const startQuiz = async (req, res) => {
     });
 
     if (response) {
-      // Resume an in-progress attempt
       if (response.status === "inprogress") {
-        return res.json({ message: "Quiz resumed", response });
+        // Time ran out while the student was away — close the attempt with what was saved
+        if (isPastTimeLimit(response, quiz)) {
+          finalizeResponse(response, quiz, "submitted");
+          await response.save();
+          return res.status(400).json({
+            message: "The time limit for this quiz has expired. Your saved answers have been submitted."
+          });
+        }
+
+        return res.json({
+          message: "Quiz resumed",
+          response: toStudentInProgressResponse(response),
+          questions: await loadStudentQuestions(quizId)
+        });
       }
       // Already finished (submitted/graded/terminated) — no automatic restart.
       // A new attempt can only be created via a faculty-granted reattempt.
       return res.status(400).json({
-        message: "You have already completed this quiz. Contact your instructor if you believe this is an error.",
-        response
+        message: "You have already completed this quiz. Contact your instructor if you believe this is an error."
       });
     }
 
     // No active attempt exists — this is a fresh attempt (attemptNumber 1, or first attempt after being granted a reattempt)
-    // Figure out the correct attemptNumber by checking the highest existing attempt for this quiz+student
     const lastAttempt = await QuizResponse.findOne({
       quiz: quizId,
       student: req.user.id
     }).sort({ attemptNumber: -1 });
 
+    // Faculty-granted reattempts are allowed past the due date
+    if (!lastAttempt && quiz.dueDate && new Date() > quiz.dueDate) {
+      return res.status(400).json({ message: "The due date for this quiz has passed" });
+    }
+
     const nextAttemptNumber = lastAttempt ? lastAttempt.attemptNumber + 1 : 1;
 
-    const questions = await Question.find({ quiz: quizId, isDeleted: false })
-      .select("_id type questionText marks options correctAnswer modelAnswer order")
-      .sort({ order: 1 });
+    const questions = await Question.find({ quiz: quizId, isDeleted: false }).sort({ order: 1 });
 
-    const responses = questions.map(q => ({
-      question: q._id,
-      studentAnswer: null,
-      isCorrect: null,
-      marksObtained: 0
-    }));
-
-    response = await QuizResponse.create({
-      quiz: quizId,
-      student: req.user.id,
-      responses,
-      status: "inprogress",
-      startedAt: new Date(),
-      attemptNumber: nextAttemptNumber,
-      isActive: true
-    });
+    try {
+      response = await QuizResponse.create({
+        quiz: quizId,
+        student: req.user.id,
+        responses: questions.map(q => ({
+          question: q._id,
+          studentAnswer: null,
+          isCorrect: null,
+          marksObtained: 0
+        })),
+        status: "inprogress",
+        startedAt: new Date(),
+        attemptNumber: nextAttemptNumber,
+        isActive: true
+      });
+    } catch (error) {
+      // Another "start" request for this quiz won the race — the unique index allows one active attempt
+      if (error.code === 11000) {
+        return res.status(409).json({ message: "This quiz is already being started. Please try again." });
+      }
+      throw error;
+    }
 
     res.status(201).json({
       message: "Quiz started successfully",
-      response,
-      questions: questions.map(q => ({
-        _id: q._id,
-        type: q.type,
-        questionText: q.questionText,
-        marks: q.marks,
-        options: q.options,
-        order: q.order
-      }))
+      response: toStudentInProgressResponse(response),
+      questions: questions.map(toStudentQuestion)
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -90,7 +151,7 @@ const saveResponse = async (req, res) => {
     const { responseId } = req.params;
     const { questionId, studentAnswer } = req.body;
 
-    const response = await QuizResponse.findById(responseId);
+    const response = await QuizResponse.findById(responseId).populate("quiz", "duration");
     if (!response) {
       return res.status(404).json({ message: "Response not found" });
     }
@@ -103,7 +164,11 @@ const saveResponse = async (req, res) => {
       return res.status(400).json({ message: "Quiz already submitted" });
     }
 
-    const question = await Question.findById(questionId);
+    if (isPastTimeLimit(response, response.quiz)) {
+      return res.status(400).json({ message: "The time limit for this quiz has expired" });
+    }
+
+    const question = await Question.findOne({ _id: questionId, quiz: response.quiz._id });
     if (!question) {
       return res.status(404).json({ message: "Question not found" });
     }
@@ -139,7 +204,8 @@ const saveResponse = async (req, res) => {
 
     await response.save();
 
-    res.json({ message: "Answer saved", response });
+    // Don't echo grading back — the student would learn which answers are correct
+    res.json({ message: "Answer saved" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -151,7 +217,7 @@ const logViolation = async (req, res) => {
     const { responseId } = req.params;
     const { reason } = req.body;
 
-    if (!reason || !reason.trim()) {
+    if (!reason || typeof reason !== "string" || !reason.trim()) {
       return res.status(400).json({ message: "Violation reason is required" });
     }
 
@@ -169,10 +235,8 @@ const logViolation = async (req, res) => {
       return res.status(400).json({ message: "Quiz is not in progress" });
     }
 
-    const MAX_VIOLATIONS = 3;
-
     response.violations.push({
-      reason: reason.trim(),
+      reason: reason.trim().slice(0, 200),
       timestamp: new Date()
     });
 
@@ -181,20 +245,8 @@ const logViolation = async (req, res) => {
 
     if (violationCount >= MAX_VIOLATIONS) {
       // Server-side auto-termination — this is the authoritative decision, not the frontend's
-      let totalMarks = 0;
-      response.responses.forEach(r => {
-        totalMarks += r.marksObtained || 0;
-      });
-
-      response.totalMarksObtained = totalMarks;
-      response.status = "terminated";
-      response.submittedAt = new Date();
-      response.timeSpent = Math.round((Date.now() - response.startedAt) / 1000);
-
-      // isPassed requires the quiz's passMarks — fetch it
-      const quiz = await Quiz.findById(response.quiz).select("passMarks");
-      response.isPassed = quiz ? totalMarks >= quiz.passMarks : false;
-
+      const quiz = await Quiz.findById(response.quiz).select("passMarks duration");
+      finalizeResponse(response, quiz, "terminated");
       terminated = true;
     }
 
@@ -234,40 +286,21 @@ const submitQuiz = async (req, res) => {
       return res.status(400).json({ message: "Quiz already submitted" });
     }
 
-    // Calculate total marks
-    let totalMarks = 0;
-    response.responses.forEach(r => {
-      totalMarks += r.marksObtained || 0;
-    });
-
-    // Check if passed
+    // Submitting after the time limit is still accepted — late saves were already rejected,
+    // so only answers given in time count
     const quiz = response.quiz;
-    const isPassed = totalMarks >= quiz.passMarks;
-
-    response.totalMarksObtained = totalMarks;
-    response.status = "submitted";
-    response.submittedAt = new Date();
-    response.timeSpent = Math.round((Date.now() - response.startedAt) / 1000); // in seconds
-    response.isPassed = isPassed;
-
+    finalizeResponse(response, quiz, "submitted");
     await response.save();
 
-    // Auto-grade short answers (mark as submitted, faculty grades later)
-    const shortAnswerCount = response.responses.filter(
-      r => r.question?.type === "shortanswer"
-    ).length;
-
-    const responseObject = response.toObject();
-    const percentageScore = (totalMarks / quiz.totalMarks) * 100;
+    const hasShortAnswers = response.responses.some(r => r.question?.type === "shortanswer");
 
     res.json({
       message: "Quiz submitted successfully",
-      score: totalMarks,
+      score: response.totalMarksObtained,
       totalMarks: quiz.totalMarks,
-      percentage: percentageScore.toFixed(2),
-      isPassed,
-      hasShortAnswers: shortAnswerCount > 0,
-      response: responseObject
+      percentage: percentageOf(response.totalMarksObtained, quiz.totalMarks),
+      isPassed: response.isPassed,
+      hasShortAnswers
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -286,7 +319,7 @@ const getSubmittedQuizzes = async (req, res) => {
 
     const submissions = await QuizResponse.find({
       quiz: quizId,
-      status: { $in: ["submitted", "graded", "terminated"] },
+      status: { $in: FINISHED_STATUSES },
       isActive: true
     })
       .populate("student", "name email")
@@ -304,8 +337,31 @@ const getSubmittedQuizzes = async (req, res) => {
       submitted,
       pending: totalStudents - submitted,
       avgScore,
+      totalMarks: quiz.totalMarks,
       submissions
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Faculty views one attempt in full, including the answer key, for review and grading
+const getResponseDetails = async (req, res) => {
+  try {
+    const response = await QuizResponse.findById(req.params.responseId)
+      .populate("quiz", "title createdBy totalMarks passMarks")
+      .populate("student", "name email")
+      .populate("responses.question", "type questionText marks options correctAnswer modelAnswer");
+
+    if (!response) {
+      return res.status(404).json({ message: "Response not found" });
+    }
+
+    if (response.quiz?.createdBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -328,17 +384,33 @@ const getStudentResponses = async (req, res) => {
       return res.status(404).json({ message: "No submission found" });
     }
 
-    // Hide correct answers if quiz doesn't allow showing answers
-    if (!response.quiz.showAnswers && response.status === "submitted") {
-      response.responses.forEach(r => {
-        if (r.question) {
-          if (r.question.type === "mcq") r.question.options = r.question.options.map(o => ({ text: o.text }));
-          if (r.question.type === "truefalse") r.question.correctAnswer = null;
-        }
-      });
+    const result = response.toObject();
+    const inProgress = result.status === "inprogress";
+    const revealAnswers = Boolean(result.quiz?.showAnswers) && !inProgress;
+
+    result.responses = result.responses.map(r => {
+      const item = { ...r };
+      if (item.question && !revealAnswers) {
+        item.question = {
+          ...item.question,
+          options: (item.question.options || []).map(o => ({ text: o.text }))
+        };
+        delete item.question.correctAnswer;
+        delete item.question.modelAnswer;
+      }
+      if (inProgress) {
+        delete item.isCorrect;
+        delete item.marksObtained;
+      }
+      return item;
+    });
+
+    if (inProgress) {
+      delete result.totalMarksObtained;
+      delete result.isPassed;
     }
 
-    res.json(response);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -350,7 +422,7 @@ const gradeShortAnswer = async (req, res) => {
     const { responseId } = req.params;
     const { questionId, marksObtained } = req.body;
 
-    if (typeof marksObtained !== "number" || marksObtained < 0) {
+    if (typeof marksObtained !== "number" || !Number.isFinite(marksObtained) || marksObtained < 0) {
       return res.status(400).json({ message: "Invalid marks" });
     }
 
@@ -363,35 +435,50 @@ const gradeShortAnswer = async (req, res) => {
     }
 
     const quiz = response.quiz;
-    if (quiz.createdBy.toString() !== req.user.id) {
+    if (!quiz || quiz.createdBy.toString() !== req.user.id) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const answerIndex = response.responses.findIndex(
-      r => r.question._id.toString() === questionId
+    if (!response.isActive || !FINISHED_STATUSES.includes(response.status)) {
+      return res.status(400).json({ message: "Only finished, current attempts can be graded" });
+    }
+
+    const answer = response.responses.find(
+      r => r.question && r.question._id.toString() === questionId
     );
 
-    if (answerIndex === -1) {
+    if (!answer) {
       return res.status(404).json({ message: "Answer not found" });
     }
 
-    const maxMarks = response.responses[answerIndex].question.marks;
+    if (answer.question.type !== "shortanswer") {
+      return res.status(400).json({ message: "Only short answer questions are graded manually" });
+    }
+
+    const maxMarks = answer.question.marks;
     if (marksObtained > maxMarks) {
       return res.status(400).json({ message: `Marks cannot exceed ${maxMarks}` });
     }
 
-    response.responses[answerIndex].marksObtained = marksObtained;
-    response.responses[answerIndex].isCorrect = marksObtained > 0;
+    answer.marksObtained = marksObtained;
+    answer.isCorrect = marksObtained > 0;
+    answer.isGraded = true;
 
     // Recalculate total marks
     response.totalMarksObtained = response.responses.reduce(
       (sum, r) => sum + (r.marksObtained || 0),
       0
     );
-
-    // Check if passed
     response.isPassed = response.totalMarksObtained >= quiz.passMarks;
-    response.status = "graded";
+
+    // Mark the attempt graded once every short answer has been reviewed.
+    // Terminated attempts keep their status so the proctoring outcome stays visible.
+    const allGraded = response.responses
+      .filter(r => r.question?.type === "shortanswer")
+      .every(r => r.isGraded);
+    if (allGraded && response.status === "submitted") {
+      response.status = "graded";
+    }
 
     await response.save();
 
@@ -416,7 +503,7 @@ const getQuizStats = async (req, res) => {
 
     const submissions = await QuizResponse.find({
       quiz: quizId,
-      status: { $in: ["submitted", "graded"] },
+      status: { $in: FINISHED_STATUSES },
       isActive: true
     });
 
@@ -426,13 +513,13 @@ const getQuizStats = async (req, res) => {
 
     const scores = submissions.map(s => s.totalMarksObtained);
     const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b) / scores.length).toFixed(2) : 0;
-    const highestScore = Math.max(...scores, 0);
-    const lowestScore = Math.min(...scores, scores.length > 0 ? scores[0] : 0);
+    const highestScore = scores.length > 0 ? Math.max(...scores) : 0;
+    const lowestScore = scores.length > 0 ? Math.min(...scores) : 0;
 
     // Score distribution (0-20%, 20-40%, etc.)
     const distribution = [0, 0, 0, 0, 0];
     scores.forEach(score => {
-      const percentage = (score / quiz.totalMarks) * 100;
+      const percentage = percentageOf(score, quiz.totalMarks);
       if (percentage <= 20) distribution[0]++;
       else if (percentage <= 40) distribution[1]++;
       else if (percentage <= 60) distribution[2]++;
@@ -449,6 +536,7 @@ const getQuizStats = async (req, res) => {
       avgScore,
       highestScore,
       lowestScore,
+      totalMarks: quiz.totalMarks,
       scoreDistribution: {
         labels: ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"],
         data: distribution
@@ -464,36 +552,40 @@ const getMyResults = async (req, res) => {
   try {
     const results = await QuizResponse.find({
       student: req.user.id,
-      status: { $in: ["submitted", "graded"] },
+      status: { $in: FINISHED_STATUSES },
       isActive: true
     })
       .populate("quiz", "title subject totalMarks")
-      .select("quiz totalMarksObtained isPassed submittedAt")
+      .select("quiz totalMarksObtained isPassed submittedAt status")
       .sort({ submittedAt: -1 });
 
-    const formattedResults = results.map(r => ({
-      quizId: r.quiz._id,
-      quizTitle: r.quiz.title,
-      subject: r.quiz.subject,
-      score: r.totalMarksObtained,
-      maxScore: r.quiz.totalMarks,
-      percentage: ((r.totalMarksObtained / r.quiz.totalMarks) * 100).toFixed(2),
-      passed: r.isPassed,
-      submittedAt: r.submittedAt
-    }));
+    const formattedResults = results
+      .filter(r => r.quiz)
+      .map(r => ({
+        quizId: r.quiz._id,
+        quizTitle: r.quiz.title,
+        subject: r.quiz.subject,
+        score: r.totalMarksObtained,
+        maxScore: r.quiz.totalMarks,
+        percentage: percentageOf(r.totalMarksObtained, r.quiz.totalMarks),
+        passed: r.isPassed,
+        status: r.status,
+        submittedAt: r.submittedAt
+      }));
 
     res.json(formattedResults);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 // Faculty grants a student a fresh attempt (e.g. after a tech glitch or wrongful auto-termination)
 const grantReattempt = async (req, res) => {
   try {
     const { responseId } = req.params;
     const { reason } = req.body;
 
-    if (!reason || !reason.trim()) {
+    if (!reason || typeof reason !== "string" || !reason.trim()) {
       return res.status(400).json({ message: "A reason is required to grant a reattempt" });
     }
 
@@ -519,6 +611,11 @@ const grantReattempt = async (req, res) => {
     // a fresh QuizResponse via startQuiz(), with the correct attemptNumber and startedAt.
     oldResponse.isActive = false;
     oldResponse.status = "superseded";
+    oldResponse.reattemptGranted = {
+      grantedBy: req.user.id,
+      reason: reason.trim(),
+      grantedAt: new Date()
+    };
     await oldResponse.save();
 
     res.json({
@@ -536,6 +633,7 @@ module.exports = {
   saveResponse,
   submitQuiz,
   getSubmittedQuizzes,
+  getResponseDetails,
   getStudentResponses,
   gradeShortAnswer,
   getQuizStats,

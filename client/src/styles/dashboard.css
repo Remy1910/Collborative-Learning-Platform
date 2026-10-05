@@ -250,11 +250,13 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
   background: var(--white);
   border: 1px solid var(--border);
   color: var(--text-muted);
+  font-family: inherit;
   cursor: pointer;
   transition: all .15s;
 }
 .filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 .filter-chip:hover { border-color: var(--primary); color: var(--primary); }
+.filter-chip.active:hover { color: #fff; }
 
 /* ── Table ───────────────────────────────────────────────────────────────────── */
 .quiz-table-wrapper {
@@ -334,6 +336,34 @@ body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color
 .assignment-course-header h3  { font-size: 1rem; font-weight: 600; color: var(--dark2); }
 .assignment-list-empty        { padding: 1.5rem; }
 .text-muted.small             { color: var(--text-muted); font-size: 0.83rem; }
+.assignment-list              { display: flex; flex-direction: column; }
+.assignment-row               { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); }
+.assignment-row:last-child    { border-bottom: none; }
+.assignment-row .text-muted.small { margin-top: 0.2rem; }
+.assignment-row .actions      { flex-shrink: 0; }
+
+/* ── Submission files ── */
+.file-chips     { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.file-chip      { display: inline-flex; align-items: center; gap: 0.35rem; max-width: 100%; padding: 0.3rem 0.65rem; border: 1px solid var(--border); border-radius: 100px; background: var(--white); color: var(--primary); font: inherit; font-size: 0.8rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip:hover { border-color: var(--primary); }
+.file-chip-size { color: var(--text-muted); font-size: 0.72rem; }
+.file-chip-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; padding: 0 0.1rem; }
+.file-chip-remove:hover { color: var(--danger); }
+.checkbox-row   { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.875rem; color: var(--dark2); cursor: pointer; }
+.checkbox-row input { margin-top: 0.2rem; }
+
+/* ── Student assignment card extras ── */
+.assignment-desc     { color: var(--text); font-size: 0.85rem; margin-top: 0.4rem; white-space: pre-line; }
+.assignment-feedback { margin-top: 0.6rem; padding: 0.6rem 0.8rem; border-left: 3px solid var(--primary); background: var(--light); border-radius: 0 var(--radius) var(--radius) 0; font-size: 0.85rem; white-space: pre-line; }
+.assignment-actions  { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
+.deadline-soon       { color: var(--danger); font-weight: 600; }
+.drop-zone           { border: 2px dashed var(--border); border-radius: var(--radius); padding: 1.25rem; text-align: center; color: var(--text-muted); font-size: 0.875rem; cursor: pointer; transition: border-color .15s, background .15s; }
+.drop-zone:hover, .drop-zone.dragging { border-color: var(--primary); background: var(--primary-light); }
+.drop-zone input     { display: none; }
+
+@media (max-width: 640px) {
+  .assignment-row { flex-direction: column; align-items: flex-start; }
+}
 
 /* Student assignment list */
 .assignment-list-student { display: flex; flex-direction: column; gap: 1rem; }

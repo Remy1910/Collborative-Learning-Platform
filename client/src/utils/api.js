@@ -3,17 +3,28 @@ const API_BASE_URL = import.meta.env.VITE_API_URL
   : "http://localhost:5000/api";
 
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
-export const getSubmissionFile = async (submissionId) => {
-  const response = await fetch(`${API_BASE_URL}/assignments/files/${submissionId}`, {
+export const getSubmissionFile = async (submissionId, fileId) => {
+  const response = await fetch(`${API_BASE_URL}/assignments/files/${submissionId}/${fileId}`, {
     headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
   });
   if (!response.ok) throw new Error("Unable to open attachment");
   return response.blob();
 };
 
-
-console.log("VITE_API_URL:", import.meta.env.VITE_API_URL);
-console.log("API_BASE_URL:", API_BASE_URL);
+// Opens a submitted file in a new tab. The tab is opened synchronously (inside the
+// click) so popup blockers allow it, then pointed at the file once it has downloaded.
+export const openSubmissionFile = async (submissionId, fileId) => {
+  const fileWindow = window.open("about:blank", "_blank");
+  try {
+    const blob = await getSubmissionFile(submissionId, fileId);
+    const url = URL.createObjectURL(blob);
+    if (fileWindow) fileWindow.location.href = url;
+    else window.location.href = url;
+  } catch (err) {
+    fileWindow?.close();
+    throw err;
+  }
+};
 
 // Helper to get auth header
 export const getAuthHeader = () => {
@@ -122,25 +133,30 @@ export const assignmentAPI = {
   createAssignment: (data) =>
     apiCall("/assignments/create", { method: "POST", body: JSON.stringify(data) }),
 
-  // Faculty: view submissions for an assignment
+  // Faculty: edit an assignment (details, deadline, max marks, late policy)
+  updateAssignment: (assignmentId, data) =>
+    apiCall(`/assignments/${assignmentId}`, { method: "PATCH", body: JSON.stringify(data) }),
+
+  // Faculty: delete an assignment and all of its submissions
+  deleteAssignment: (assignmentId) =>
+    apiCall(`/assignments/${assignmentId}`, { method: "DELETE" }),
+
+  // Faculty: view submissions for an assignment → { assignment, submissions }
   getSubmissions: (assignmentId) =>
     apiCall(`/assignments/${assignmentId}/submissions`),
 
   // Faculty: view assignments in one of their courses
   getFacultyAssignments: (courseId) => apiCall(`/assignments/course/${courseId}`),
 
-  // Faculty: grade a submission
+  // Faculty: grade (or regrade) a submission — { submissionId, marks, feedback }
   gradeSubmission: (data) =>
     apiCall("/assignments/mark", { method: "POST", body: JSON.stringify(data) }),
 
   // Faculty: stats
   getStats: () => apiCall("/assignments/stats"),
 
-  // Student: submit assignment
-  submitAssignment: (data) =>
-    apiCall("/assignments/submit", { method: "POST", body: JSON.stringify(data) }),
-
-  submitAssignmentWithFile: async (data) => {
+  // Student: submit or resubmit — FormData with assignmentId, optional content (note) and "files"
+  submitAssignment: async (data) => {
     const response = await fetch(`${API_BASE_URL}/assignments/submit`, {
       method: "POST",
       headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
@@ -154,7 +170,7 @@ export const assignmentAPI = {
   // Student: view own submissions
   getMySubmissions: () => apiCall("/assignments/my-submissions"),
 
-  // Student: view assignments for enrolled courses
+  // Student: view assignments for enrolled courses, each with their own `submission` (or null)
   getAvailableAssignments: () => apiCall("/assignments/available"),
 };
 
@@ -211,6 +227,9 @@ export const quizAPI = {
     apiCall(`/quiz-responses/${quizId}/submissions`),
 
   getStats: (quizId) => apiCall(`/quiz-responses/${quizId}/stats`),
+
+  getResponseDetails: (responseId) =>
+    apiCall(`/quiz-responses/${responseId}/details`),
 
   gradeShortAnswer: (responseId, data) =>
     apiCall(`/quiz-responses/${responseId}/grade`, {

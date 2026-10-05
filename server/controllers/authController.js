@@ -1,15 +1,18 @@
 const User = require("../models/User");
-console.log("User model check:", User);
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { validateEmail, validatePassword, validateName } = require("../utils/validation");
 const crypto = require("crypto");
 const sendEmail = require("../utils/sendEmail");
 
+// Emails are matched case-insensitively and ignore stray spaces from copy-paste
+const normalizeEmail = (email) => (typeof email === "string" ? email.trim().toLowerCase() : "");
+
 // REGISTER
 const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, password, role } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     // Validate inputs
     if (!validateName(name)) {
@@ -24,11 +27,12 @@ const register = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
-    if (!["student", "faculty", "admin"].includes(role)) {
-      return res.status(400).json({ message: "Invalid role. Must be student, faculty, or admin" });
+    // Admin accounts can't be self-registered
+    if (!["student", "faculty"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role. Must be student or faculty" });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered" });
     }
@@ -37,7 +41,7 @@ const register = async (req, res) => {
 
     await User.create({
       name: name.trim(),
-      email: email.toLowerCase(),
+      email,
       password: hashedPassword,
       role
     });
@@ -52,7 +56,8 @@ const register = async (req, res) => {
 // LOGIN
 const login = async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { password, role } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     if (!validateEmail(email)) {
       return res.status(400).json({ message: "Invalid email format" });
@@ -62,7 +67,7 @@ const login = async (req, res) => {
       return res.status(400).json({ message: "Password is required" });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email }).select("+password");
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -102,13 +107,13 @@ const login = async (req, res) => {
 // FORGOT PASSWORD
 const forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     if (!validateEmail(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email });
     if (!user) {
       // Return success to avoid user enumeration, but include simulated message in dev
       const devPayload = {

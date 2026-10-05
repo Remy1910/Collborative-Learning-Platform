@@ -4,7 +4,8 @@ const courseSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: true
+      required: true,
+      trim: true
     },
     description: {
       type: String
@@ -14,6 +15,7 @@ const courseSchema = new mongoose.Schema(
       ref: "User",
       required: true
     },
+    // Single source of truth for enrollment
     students: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -23,5 +25,9 @@ const courseSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Faculty dashboards look courses up by owner, student views by enrollment
+courseSchema.index({ faculty: 1 });
+courseSchema.index({ students: 1 });
 
 module.exports = mongoose.model("Course", courseSchema);

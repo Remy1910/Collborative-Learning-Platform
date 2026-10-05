@@ -470,11 +470,6 @@ function QuizTaker() {
                     onChange={e => handleAnswerChange(currentQ._id, e.target.value)}
                     rows="6"
                   />
-                  {currentQ.modelAnswer && (
-                    <div className="model-answer">
-                      💡 <strong>Hint:</strong> {currentQ.modelAnswer}
-                    </div>
-                  )}
                 </div>
               )}
             </div>

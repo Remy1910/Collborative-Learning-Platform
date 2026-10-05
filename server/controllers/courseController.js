@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Course = require("../models/Course");
 const { validateTitle } = require("../utils/validation");
 
@@ -31,38 +32,26 @@ const createCourse = async (req, res) => {
   }
 };
 
-// Enroll Student
-const enrollCourse = async (req, res) => {
-  try {
-    const course = await Course.findById(req.params.id);
-
-    if (!course) {
-      return res.status(404).json({ message: "Course not found" });
-    }
-
-    // Prevent duplicate enrollment
-    if (course.students.some(id => id.toString() === req.user.id)) {
-      return res.status(400).json({ message: "Already enrolled" });
-    }
-
-    course.students.push(req.user.id);
-    await course.save();
-
-    res.json({ message: "Enrolled successfully" });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get All Courses
+// Faculty get their own courses with the class list; students get the full
+// catalogue with only a head count, so classmates' details aren't exposed
 const getCourses = async (req, res) => {
   try {
-    const courses = await Course.find()
-      .populate("faculty", "name email")
-      .populate("students", "name email");
+    if (req.user.role === "faculty") {
+      const courses = await Course.find({ faculty: req.user.id })
+        .populate("faculty", "name")
+        .populate("students", "name email");
+      return res.json(courses);
+    }
 
-    res.json(courses);
+    const courses = await Course.find().populate("faculty", "name");
+    res.json(courses.map(course => {
+      const { students, ...rest } = course.toObject();
+      return {
+        ...rest,
+        studentCount: students.length,
+        isEnrolled: students.some(id => id.toString() === req.user.id)
+      };
+    }));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -73,23 +62,23 @@ const enrollInCourse = async (req, res) => {
     const { courseId } = req.params;
 
     // Validate courseId format
-    if (!courseId || courseId.length !== 24) {
+    if (!mongoose.isValidObjectId(courseId)) {
       return res.status(400).json({ message: "Invalid course ID" });
     }
 
-    const course = await Course.findById(courseId);
+    // Atomic add — only matches if the student isn't already enrolled, so double clicks can't enroll twice
+    const course = await Course.findOneAndUpdate(
+      { _id: courseId, students: { $ne: req.user.id } },
+      { $addToSet: { students: req.user.id } },
+      { new: true }
+    );
 
     if (!course) {
-      return res.status(404).json({ message: "Course not found" });
+      const exists = await Course.exists({ _id: courseId });
+      return exists
+        ? res.status(400).json({ message: "You are already enrolled in this course" })
+        : res.status(404).json({ message: "Course not found" });
     }
-
-    // Check if already enrolled
-    if (course.students.some(id => id.toString() === req.user.id)) {
-      return res.status(400).json({ message: "You are already enrolled in this course" });
-    }
-
-    course.students.push(req.user.id);
-    await course.save();
 
     res.json({
       message: "Enrolled in course successfully",
@@ -104,4 +93,4 @@ const enrollInCourse = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-module.exports = { createCourse, enrollCourse, getCourses, enrollInCourse };
+module.exports = { createCourse, getCourses, enrollInCourse };

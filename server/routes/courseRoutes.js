@@ -3,12 +3,10 @@ const router = express.Router();
 
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
-const { enrollInCourse } = require("../controllers/courseController");
-
 const {
   createCourse,
-  enrollCourse,
-  getCourses
+  getCourses,
+  enrollInCourse
 } = require("../controllers/courseController");
 
 // Faculty Only - Create Course

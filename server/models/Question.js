@@ -30,7 +30,7 @@ const questionSchema = new mongoose.Schema(
     ],
     // For True/False
     correctAnswer: Boolean,
-    // For Short Answer (guidance for students)
+    // For Short Answer — faculty's grading reference, never sent to students
     modelAnswer: String,
     order: {
       type: Number,

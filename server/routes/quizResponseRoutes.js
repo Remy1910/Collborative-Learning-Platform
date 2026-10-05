@@ -9,6 +9,7 @@ const {
   saveResponse,
   submitQuiz,
   getSubmittedQuizzes,
+  getResponseDetails,
   getStudentResponses,
   gradeShortAnswer,
   getQuizStats,
@@ -44,6 +45,9 @@ router.get("/student/my-results", protect, authorizeRoles("student"), getMyResul
 
 // Get all submissions for a quiz
 router.get("/:quizId/submissions", protect, authorizeRoles("faculty"), getSubmittedQuizzes);
+
+// Get one attempt in full (answers + answer key) for review
+router.get("/:responseId/details", protect, authorizeRoles("faculty"), getResponseDetails);
 
 // Grade short answer question
 router.patch("/:responseId/grade", protect, authorizeRoles("faculty"), gradeShortAnswer);

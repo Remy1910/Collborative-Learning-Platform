@@ -1,16 +1,59 @@
+const mongoose = require("mongoose");
 const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
-const User = require("../models/User");
 const QuizResponse = require("../models/QuizResponse");
 const Course = require("../models/Course");
+
+const QUESTION_TYPES = ["mcq", "truefalse", "shortanswer"];
+
+const isNonNegativeNumber = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+// Keeps totalQuestions/totalMarks in step with the quiz's live questions,
+// so percentages and pass/fail are always measured against the real maximum
+const syncQuizTotals = async (quiz) => {
+  const questions = await Question.find({ quiz: quiz._id, isDeleted: false }).select("marks");
+  quiz.totalQuestions = questions.length;
+  quiz.totalMarks = questions.reduce((sum, q) => sum + (q.marks || 0), 0);
+  await quiz.save();
+};
+
+// Returns an error message, or null if the question data is valid for its type
+const validateQuestionData = ({ type, marks, options, correctAnswer }) => {
+  if (!QUESTION_TYPES.includes(type)) return "Invalid question type";
+
+  if (marks !== undefined && (typeof marks !== "number" || !Number.isFinite(marks) || marks < 1)) {
+    return "Marks must be a number of at least 1";
+  }
+
+  if (type === "mcq") {
+    if (!Array.isArray(options) || options.length < 2) return "MCQ must have at least 2 options";
+    if (options.some(opt => typeof opt?.text !== "string" || !opt.text.trim())) return "MCQ options cannot be empty";
+    // Auto-grading compares against a single correct option
+    if (options.filter(opt => opt.isCorrect).length !== 1) return "MCQ must have exactly one correct option";
+  }
+
+  if (type === "truefalse" && typeof correctAnswer !== "boolean") {
+    return "True/False must have correct answer";
+  }
+
+  return null;
+};
 
 // Faculty creates a new quiz
 const createQuiz = async (req, res) => {
   try {
-    const { title, subject, description, duration, dueDate, totalMarks, passMarks, courseId } = req.body;
+    const { title, subject, description, duration, dueDate, passMarks, courseId } = req.body;
 
     if (!title || !subject) {
       return res.status(400).json({ message: "Title and subject are required" });
+    }
+
+    if (duration !== undefined && duration !== null && (!isNonNegativeNumber(duration) || duration < 1)) {
+      return res.status(400).json({ message: "Duration must be at least 1 minute" });
+    }
+
+    if (passMarks !== undefined && passMarks !== null && !isNonNegativeNumber(passMarks)) {
+      return res.status(400).json({ message: "Pass marks must be a non-negative number" });
     }
 
     if (courseId) {
@@ -23,14 +66,15 @@ const createQuiz = async (req, res) => {
       }
     }
 
+    // totalMarks is derived from the questions as they are added
     const quiz = await Quiz.create({
       title,
       subject,
       description,
       duration,
       dueDate,
-      totalMarks: totalMarks || 100,
-      passMarks: passMarks || 40,
+      totalMarks: 0,
+      passMarks: passMarks ?? 40,
       course: courseId || undefined,
       createdBy: req.user.id,
       status: "draft"
@@ -49,7 +93,7 @@ const createQuiz = async (req, res) => {
 const updateQuiz = async (req, res) => {
   try {
     const { quizId } = req.params;
-    const { title, subject, description, duration, dueDate, totalMarks, passMarks } = req.body;
+    const { title, subject, description, duration, dueDate, passMarks } = req.body;
 
     const quiz = await Quiz.findById(quizId);
     if (!quiz) {
@@ -65,7 +109,15 @@ const updateQuiz = async (req, res) => {
       return res.status(400).json({ message: "Cannot edit published quiz" });
     }
 
-    Object.assign(quiz, { title, subject, description, duration, dueDate, totalMarks, passMarks });
+    if (passMarks !== undefined && !isNonNegativeNumber(passMarks)) {
+      return res.status(400).json({ message: "Pass marks must be a non-negative number" });
+    }
+
+    // Only overwrite fields that were actually sent
+    const updates = { title, subject, description, duration, dueDate, passMarks };
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value !== undefined) quiz[key] = value;
+    });
     await quiz.save();
 
     res.json({ message: "Quiz updated successfully", quiz });
@@ -84,7 +136,7 @@ const getQuizzes = async (req, res) => {
     if (subject) filter.subject = subject;
 
     const quizzes = await Quiz.find(filter)
-      .select("title subject status totalQuestions totalMarks dueDate createdAt isPublished")
+      .select("title subject description status totalQuestions totalMarks dueDate createdAt isPublished")
       .sort({ createdAt: -1 });
 
     res.json(quizzes);
@@ -120,6 +172,12 @@ const getQuizById = async (req, res) => {
 
     const questions = await Question.find({ quiz: quizId, isDeleted: false }).sort({ order: 1 });
 
+    const quizObject = quiz.toObject();
+    if (req.user.role === "student") {
+      // Students don't need the class list
+      delete quizObject.assignedTo;
+    }
+
     const visibleQuestions = req.user.role === "student"
       ? questions.map(question => {
         const visible = question.toObject();
@@ -131,7 +189,7 @@ const getQuizById = async (req, res) => {
       : questions;
 
     res.json({
-      ...quiz.toObject(),
+      ...quizObject,
       questions: visibleQuestions
     });
   } catch (error) {
@@ -145,7 +203,7 @@ const publishQuiz = async (req, res) => {
     const { quizId } = req.params;
 
     const quiz = await Quiz.findById(quizId);
-    if (!quiz) {
+    if (!quiz || quiz.isDeleted) {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
@@ -153,9 +211,20 @@ const publishQuiz = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const questionCount = await Question.countDocuments({ quiz: quizId, isDeleted: false });
-    if (questionCount === 0) {
+    if (quiz.isPublished) {
+      return res.status(400).json({ message: "Quiz is already published" });
+    }
+
+    await syncQuizTotals(quiz);
+
+    if (quiz.totalQuestions === 0) {
       return res.status(400).json({ message: "Quiz must have at least one question" });
+    }
+
+    if (quiz.passMarks > quiz.totalMarks) {
+      return res.status(400).json({
+        message: `Pass marks (${quiz.passMarks}) cannot exceed the quiz total of ${quiz.totalMarks} marks`
+      });
     }
 
     quiz.isPublished = true;
@@ -201,8 +270,13 @@ const assignQuizToStudents = async (req, res) => {
       return res.status(400).json({ message: "Student IDs required" });
     }
 
+    const requestedIds = [...new Set(studentIds.map(String))];
+    if (requestedIds.some(id => !mongoose.isValidObjectId(id))) {
+      return res.status(400).json({ message: "Invalid student ID" });
+    }
+
     const quiz = await Quiz.findById(quizId);
-    if (!quiz) {
+    if (!quiz || quiz.isDeleted) {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
@@ -210,7 +284,15 @@ const assignQuizToStudents = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    quiz.assignedTo = [...new Set([...quiz.assignedTo, ...studentIds])];
+    // Faculty may only assign to students enrolled in one of their own courses
+    const courses = await Course.find({ faculty: req.user.id, students: { $in: requestedIds } }).select("students");
+    const enrolledIds = new Set(courses.flatMap(course => course.students.map(String)));
+    if (requestedIds.some(id => !enrolledIds.has(id))) {
+      return res.status(400).json({ message: "Quizzes can only be assigned to students enrolled in your courses" });
+    }
+
+    // Compare as strings — a Set of ObjectIds would never dedupe
+    quiz.assignedTo = [...new Set([...quiz.assignedTo.map(String), ...requestedIds])];
     await quiz.save();
 
     res.json({ message: "Quiz assigned successfully", quiz });
@@ -231,20 +313,23 @@ const getStudentQuizzes = async (req, res) => {
       .populate("createdBy", "name")
       .sort({ dueDate: 1 });
 
-    // Get student's submission status for each quiz
-    const quizzesWithStatus = await Promise.all(
-      quizzes.map(async (quiz) => {
-        const response = await QuizResponse.findOne({
-          quiz: quiz._id,
-          student: req.user.id
-        });
-        return {
-          ...quiz.toObject(),
-          submissionStatus: response ? response.status : "notStarted",
-          score: response ? response.totalMarksObtained : null
-        };
-      })
-    );
+    // Only the active attempt matters — superseded ones are replaced by a granted reattempt
+    const responses = await QuizResponse.find({
+      quiz: { $in: quizzes.map(quiz => quiz._id) },
+      student: req.user.id,
+      isActive: true
+    }).select("quiz status totalMarksObtained");
+    const responseByQuiz = new Map(responses.map(response => [response.quiz.toString(), response]));
+
+    const quizzesWithStatus = quizzes.map(quiz => {
+      const response = responseByQuiz.get(quiz._id.toString());
+      const isFinished = response && response.status !== "inprogress";
+      return {
+        ...quiz.toObject(),
+        submissionStatus: response ? response.status : "notStarted",
+        score: isFinished ? response.totalMarksObtained : null
+      };
+    });
 
     res.json(quizzesWithStatus);
   } catch (error) {
@@ -262,12 +347,13 @@ const addQuestion = async (req, res) => {
       return res.status(400).json({ message: "Type and question text required" });
     }
 
-    if (!["mcq", "truefalse", "shortanswer"].includes(type)) {
-      return res.status(400).json({ message: "Invalid question type" });
+    const validationError = validateQuestionData({ type, marks, options, correctAnswer });
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
     }
 
     const quiz = await Quiz.findById(quizId);
-    if (!quiz) {
+    if (!quiz || quiz.isDeleted) {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
@@ -279,20 +365,6 @@ const addQuestion = async (req, res) => {
       return res.status(400).json({ message: "Cannot add questions to published quiz" });
     }
 
-    // Validate question data
-    if (type === "mcq") {
-      if (!options || options.length < 2) {
-        return res.status(400).json({ message: "MCQ must have at least 2 options" });
-      }
-      if (!options.some(opt => opt.isCorrect)) {
-        return res.status(400).json({ message: "At least one option must be correct" });
-      }
-    }
-
-    if (type === "truefalse" && correctAnswer === undefined) {
-      return res.status(400).json({ message: "True/False must have correct answer" });
-    }
-
     const order = await Question.countDocuments({ quiz: quizId, isDeleted: false });
 
     const question = await Question.create({
@@ -300,15 +372,13 @@ const addQuestion = async (req, res) => {
       type,
       questionText,
       marks: marks || 1,
-      options: type === "mcq" ? options : undefined,
+      options: type === "mcq" ? options.map(opt => ({ text: opt.text.trim(), isCorrect: Boolean(opt.isCorrect) })) : undefined,
       correctAnswer: type === "truefalse" ? correctAnswer : undefined,
-      modelAnswer,
+      modelAnswer: type === "shortanswer" ? modelAnswer : undefined,
       order
     });
 
-    // Update quiz question count
-    quiz.totalQuestions = await Question.countDocuments({ quiz: quizId, isDeleted: false });
-    await quiz.save();
+    await syncQuizTotals(quiz);
 
     res.status(201).json({
       message: "Question added successfully",
@@ -330,15 +400,34 @@ const updateQuestion = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const question = await Question.findOneAndUpdate(
-      { _id: questionId, quiz: quizId },
-      { type, questionText, marks, options, correctAnswer, modelAnswer },
-      { new: true, runValidators: true }
-    );
+    // Changing a question after students have answered it would silently regrade them
+    if (quiz.isPublished) {
+      return res.status(400).json({ message: "Cannot edit questions of a published quiz" });
+    }
 
-    if (!question) {
+    const existing = await Question.findOne({ _id: questionId, quiz: quizId, isDeleted: false });
+    if (!existing) {
       return res.status(404).json({ message: "Question not found" });
     }
+
+    const merged = {
+      type: type ?? existing.type,
+      questionText: questionText ?? existing.questionText,
+      marks: marks ?? existing.marks,
+      options: options ?? existing.options,
+      correctAnswer: correctAnswer ?? existing.correctAnswer,
+      modelAnswer: modelAnswer ?? existing.modelAnswer
+    };
+
+    const validationError = validateQuestionData(merged);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
+    }
+
+    Object.assign(existing, merged);
+    const question = await existing.save();
+
+    await syncQuizTotals(quiz);
 
     res.json({ message: "Question updated successfully", question });
   } catch (error) {
@@ -356,6 +445,10 @@ const deleteQuestion = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
+    if (quiz.isPublished) {
+      return res.status(400).json({ message: "Cannot delete questions from a published quiz" });
+    }
+
     const question = await Question.findOneAndUpdate(
       { _id: questionId, quiz: quizId },
       { isDeleted: true },
@@ -366,9 +459,7 @@ const deleteQuestion = async (req, res) => {
       return res.status(404).json({ message: "Question not found" });
     }
 
-    // Update question count
-    quiz.totalQuestions = await Question.countDocuments({ quiz: quizId, isDeleted: false });
-    await quiz.save();
+    await syncQuizTotals(quiz);
 
     res.json({ message: "Question deleted successfully" });
   } catch (error) {

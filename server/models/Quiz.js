@@ -30,19 +30,24 @@ const quizSchema = new mongoose.Schema(
     ],
     duration: {
       type: Number,
-      default: null // in minutes, null means untimed
+      default: null, // in minutes, null means untimed
+      min: 1
     },
     totalQuestions: {
       type: Number,
-      default: 0
+      default: 0,
+      min: 0
     },
+    // Sum of the quiz's question marks, kept in sync by the quiz controller
     totalMarks: {
       type: Number,
-      default: 100
+      default: 0,
+      min: 0
     },
     passMarks: {
       type: Number,
-      default: 40
+      default: 40,
+      min: 0
     },
     dueDate: Date,
     status: {

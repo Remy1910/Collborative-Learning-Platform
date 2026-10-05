@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, openSubmissionFile } from "../utils/api";
+import {
+  ACCEPTED_FILE_TYPES, MAX_FILES, formatDateTime, formatFileSize, isPastDeadline, timeUntil, validateSubmissionFiles
+} from "../utils/assignments";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -66,7 +69,6 @@ function StudentDashboard() {
   const [results, setResults] = useState([]);
   const [courses, setCourses] = useState([]);
   const [assignments, setAssignments] = useState([]);
-  const [mySubmissions, setMySubmissions] = useState([]);
   const [notices, setNotices] = useState([]);
 
   // Loading / alerts
@@ -80,7 +82,10 @@ function StudentDashboard() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [submitContent, setSubmitContent] = useState("");
-  const [submitFile, setSubmitFile] = useState(null);
+  const [submitFiles, setSubmitFiles] = useState([]);
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
 
   useEffect(() => { loadTabData(); }, [activeTab]);
@@ -104,14 +109,8 @@ function StudentDashboard() {
         setCourses(Array.isArray(c) ? c : []);
       }
       if (activeTab === "assignments") {
-        const [q, a, s] = await Promise.all([
-          quizAPI.getAssignedQuizzes().catch(() => []),
-          assignmentAPI.getAvailableAssignments().catch(() => []),
-          assignmentAPI.getMySubmissions().catch(() => []),
-        ]);
-        setQuizzes(Array.isArray(q) ? q : []);
+        const a = await assignmentAPI.getAvailableAssignments().catch(() => []);
         setAssignments(Array.isArray(a) ? a : []);
-        setMySubmissions(Array.isArray(s) ? s : []);
       }
     } catch (err) {
       setError(err.message);
@@ -144,24 +143,59 @@ function StudentDashboard() {
     }
   };
 
+  const openSubmitModal = (assignment) => {
+    setSelectedAssignment(assignment);
+    setSubmitContent("");
+    setSubmitFiles([]);
+    setSubmitError("");
+    setShowSubmitModal(true);
+  };
+
+  // Adds picked/dropped files to the selection, skipping duplicates by name+size
+  const addSubmitFiles = (fileList) => {
+    const incoming = Array.from(fileList || []);
+    if (incoming.length === 0) return;
+    const merged = [...submitFiles];
+    incoming.forEach(f => {
+      if (!merged.some(m => m.name === f.name && m.size === f.size)) merged.push(f);
+    });
+    setSubmitError(validateSubmissionFiles(merged));
+    setSubmitFiles(merged);
+  };
+
+  const removeSubmitFile = (index) => {
+    const remaining = submitFiles.filter((_, i) => i !== index);
+    setSubmitFiles(remaining);
+    setSubmitError(remaining.length ? validateSubmissionFiles(remaining) : "");
+  };
+
   const handleSubmitAssignment = async () => {
-    if (!submitContent.trim() && !submitFile) { setError("Add written content or attach a file"); return; }
+    const validationError = validateSubmissionFiles(submitFiles);
+    if (validationError) { setSubmitError(validationError); return; }
     try {
-      setLoading(true);
+      setSubmitting(true);
       const formData = new FormData();
       formData.append("assignmentId", selectedAssignment._id);
       formData.append("content", submitContent);
-      if (submitFile) formData.append("file", submitFile);
-      await assignmentAPI.submitAssignmentWithFile(formData);
-      showMsg("Assignment submitted successfully!");
+      submitFiles.forEach(f => formData.append("files", f));
+      const res = await assignmentAPI.submitAssignment(formData);
+      showMsg(res.message || "Assignment submitted successfully!");
       setShowSubmitModal(false);
       setSubmitContent("");
-      setSubmitFile(null);
+      setSubmitFiles([]);
       loadTabData();
     } catch (err) {
-      setError(err.message);
+      setSubmitError(err.message);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+    }
+  };
+
+  const handleOpenFile = async (submissionId, fileId) => {
+    try {
+      await openSubmissionFile(submissionId, fileId);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -176,16 +210,33 @@ function StudentDashboard() {
     }
   };
 
-  const userId = localStorage.getItem("userId");
-  const enrolledCourses = courses.filter(c =>
-    c.students?.some(s => (s._id || s) === userId)
-  );
-  const availableCourses = courses.filter(c =>
-    !c.students?.some(s => (s._id || s) === userId)
-  );
+  const enrolledCourses = courses.filter(c => c.isEnrolled);
+  const availableCourses = courses.filter(c => !c.isEnrolled);
 
-  const upcomingQuizzes = quizzes.filter(q => q.submissionStatus === "notStarted");
-  const submittedQuizzes = quizzes.filter(q => q.submissionStatus !== "notStarted");
+  // In-progress attempts stay in the pending list so they can be resumed
+  const upcomingQuizzes = quizzes.filter(q => ["notStarted", "inprogress"].includes(q.submissionStatus));
+  const submittedQuizzes = quizzes.filter(q => !["notStarted", "inprogress"].includes(q.submissionStatus));
+
+  const QUIZ_STATUS_LABELS = {
+    submitted: "Submitted",
+    graded: "Graded",
+    terminated: "Auto-submitted",
+  };
+
+  // Where each assignment stands for this student
+  const assignmentState = (a) => {
+    const s = a.submission;
+    if (s && s.marks !== null && s.marks !== undefined) return "graded";
+    const closed = isPastDeadline(a.dueDate) && !a.allowLateSubmissions;
+    if (s) return closed ? "submitted-closed" : "submitted";
+    return closed ? "missed" : "todo";
+  };
+  const ASSIGNMENT_GROUPS = [
+    { id: "todo", title: "📝 To do" },
+    { id: "submitted", title: "📤 Submitted — awaiting grade", match: ["submitted", "submitted-closed"] },
+    { id: "graded", title: "✅ Graded" },
+    { id: "missed", title: "⛔ Missed" },
+  ];
 
   return (
     <div className="dashboard-container">
@@ -279,7 +330,7 @@ function StudentDashboard() {
                             </div>
                           </div>
                           <button className="btn-primary btn-small" onClick={() => navigate(`/quiz/${q._id}/take`)}>
-                            <IconPlay /> Start
+                            <IconPlay /> {q.submissionStatus === "inprogress" ? "Resume" : "Start"}
                           </button>
                         </div>
                       ))}
@@ -379,7 +430,7 @@ function StudentDashboard() {
                         <p className="course-desc">{c.description || "No description."}</p>
                         <div className="course-stats">
                           <div className="course-stat">
-                            <span className="course-stat-num">{c.students?.length || 0}</span>
+                            <span className="course-stat-num">{c.studentCount || 0}</span>
                             <span className="course-stat-lbl">Peers</span>
                           </div>
                           <div className="course-stat">
@@ -410,7 +461,7 @@ function StudentDashboard() {
                         <p className="course-desc">{c.description || "No description."}</p>
                         <div className="course-stats">
                           <div className="course-stat">
-                            <span className="course-stat-num">{c.students?.length || 0}</span>
+                            <span className="course-stat-num">{c.studentCount || 0}</span>
                             <span className="course-stat-lbl">Enrolled</span>
                           </div>
                           <div className="course-stat">
@@ -462,7 +513,7 @@ function StudentDashboard() {
                         <div key={q._id} className="quiz-card">
                           <div className="quiz-card-header">
                             <h4>{q.title}</h4>
-                            <span className="badge badge-warning">Pending</span>
+                            <span className="badge badge-warning">{q.submissionStatus === "inprogress" ? "In Progress" : "Pending"}</span>
                           </div>
                           <p className="quiz-subject">{q.subject}</p>
                           <div className="quiz-details">
@@ -477,7 +528,7 @@ function StudentDashboard() {
                             style={{ width: "100%", marginTop: "1rem" }}
                             onClick={() => navigate(`/quiz/${q._id}/take`)}
                           >
-                            <IconPlay /> Start Quiz
+                            <IconPlay /> {q.submissionStatus === "inprogress" ? "Resume Quiz" : "Start Quiz"}
                           </button>
                         </div>
                       ))}
@@ -497,8 +548,8 @@ function StudentDashboard() {
                             <p className="quiz-subject">{q.subject} • {q.totalMarks} marks</p>
                           </div>
                           <div className="quiz-row-status">
-                            <span className={`badge badge-${q.submissionStatus === "submitted" ? "active" : "draft"}`}>
-                              {q.submissionStatus === "submitted" ? "Submitted" : "In Progress"}
+                            <span className={`badge badge-${q.submissionStatus === "terminated" ? "fail" : "active"}`}>
+                              {QUIZ_STATUS_LABELS[q.submissionStatus] || q.submissionStatus}
                             </span>
                             {q.score != null && (
                               <span className="quiz-score">{q.score} / {q.totalMarks}</span>
@@ -529,37 +580,97 @@ function StudentDashboard() {
                 <p>Enroll in a course to see its assignments here.</p>
               </div>
             ) : (
-              <div className="assignment-list-student">
-                {assignments.map(assignment => {
-                  const submission = mySubmissions.find(sub => sub.assignment?._id === assignment._id);
-                  return <div key={assignment._id} className="assignment-card-student">
-                    <div className="assignment-left">
-                      <div className="assignment-icon">📋</div>
-                      <div>
-                        <h4>{assignment.title}</h4>
-                        <p className="assignment-course">{assignment.course?.title || ""}</p>
-                        <p className="assignment-date">{assignment.dueDate ? `Due: ${new Date(assignment.dueDate).toLocaleDateString()}` : "No due date"}</p>
-                      </div>
-                    </div>
-                    <div className="assignment-right">
-                      {!submission ? (
-                        <button className="btn-primary" onClick={() => { setSelectedAssignment(assignment); setShowSubmitModal(true); }}>
-                          Submit
-                        </button>
-                      ) : submission.marks !== null && submission.marks !== undefined ? (
-                        <div className="grade-display">
-                          <div className="grade-num">{submission.marks}<span>/100</span></div>
-                          <div className={`grade-label ${submission.marks >= 40 ? "pass" : "fail"}`}>
-                            {submission.marks >= 40 ? "Passed" : "Failed"}
+              ASSIGNMENT_GROUPS.map(group => {
+                const items = assignments.filter(a => (group.match || [group.id]).includes(assignmentState(a)));
+                if (items.length === 0) return null;
+                return (
+                  <div key={group.id} style={{ marginBottom: "2rem" }}>
+                    <h3 className="section-label">{group.title} ({items.length})</h3>
+                    <div className="assignment-list-student">
+                      {items.map(assignment => {
+                        const submission = assignment.submission;
+                        const state = assignmentState(assignment);
+                        const pastDeadline = isPastDeadline(assignment.dueDate);
+                        const dueSoon = !pastDeadline && assignment.dueDate &&
+                          new Date(assignment.dueDate) - new Date() < 24 * 3600e3;
+                        const maxMarks = assignment.maxMarks ?? 100;
+                        return (
+                          <div key={assignment._id} className="assignment-card-student">
+                            <div className="assignment-left">
+                              <div className="assignment-icon">📋</div>
+                              <div>
+                                <h4>{assignment.title}</h4>
+                                <p className="assignment-course">{assignment.course?.title || ""} · {maxMarks} marks</p>
+                                <p className="assignment-date">
+                                  {assignment.dueDate ? `Deadline: ${formatDateTime(assignment.dueDate)}` : "No deadline"}
+                                  {assignment.dueDate && state !== "graded" && (
+                                    <span className={dueSoon ? "deadline-soon" : ""}> · {timeUntil(assignment.dueDate)}</span>
+                                  )}
+                                  {pastDeadline && assignment.allowLateSubmissions && state === "todo" && " · late submissions accepted"}
+                                </p>
+                                {assignment.description && state === "todo" && (
+                                  <p className="assignment-desc">{assignment.description}</p>
+                                )}
+                                {submission && (
+                                  <>
+                                    <p className="assignment-date">
+                                      Submitted {formatDateTime(submission.submittedAt)}
+                                      {submission.attemptCount > 1 && ` · attempt ${submission.attemptCount}`}
+                                      {submission.isLate && <span className="badge badge-warning" style={{ marginLeft: "0.4rem" }}>Late</span>}
+                                    </p>
+                                    <div className="file-chips">
+                                      {submission.files.map(file => (
+                                        <button
+                                          key={file._id}
+                                          type="button"
+                                          className="file-chip"
+                                          onClick={() => handleOpenFile(submission._id, file._id)}
+                                        >
+                                          {file.mimeType === "application/pdf" ? "📄" : "🖼️"} {file.originalName}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    {submission.feedback && (
+                                      <div className="assignment-feedback">
+                                        <strong>Feedback:</strong> {submission.feedback}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="assignment-right assignment-actions">
+                              {state === "graded" ? (
+                                <div className="grade-display">
+                                  <div className="grade-num">{submission.marks}<span>/{maxMarks}</span></div>
+                                  <div className="grade-label pass" style={{ color: "var(--text-muted)" }}>
+                                    {Math.round((submission.marks / maxMarks) * 100)}%
+                                  </div>
+                                </div>
+                              ) : state === "todo" ? (
+                                <button className="btn-primary" onClick={() => openSubmitModal(assignment)}>
+                                  <IconSend /> Submit
+                                </button>
+                              ) : state === "submitted" ? (
+                                <>
+                                  <span className="badge badge-warning">Awaiting grade</span>
+                                  <button className="btn-secondary btn-small" onClick={() => openSubmitModal(assignment)}>
+                                    Resubmit
+                                  </button>
+                                </>
+                              ) : state === "submitted-closed" ? (
+                                <span className="badge badge-warning">Awaiting grade</span>
+                              ) : (
+                                <span className="badge badge-fail">Missed</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="badge badge-warning">Awaiting Grade</span>
-                      )}
+                        );
+                      })}
                     </div>
-                  </div>;
-                })}
-              </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
@@ -595,7 +706,7 @@ function StudentDashboard() {
                   </div>
                   <div className="summary-stat">
                     <div className="summary-val">
-                      {results.length ? Math.round(results.reduce((a, r) => a + (r.percentage || 0), 0) / results.length) : 0}%
+                      {results.length ? Math.round(results.reduce((a, r) => a + (Number(r.percentage) || 0), 0) / results.length) : 0}%
                     </div>
                     <div className="summary-lbl">Avg Score</div>
                   </div>
@@ -646,39 +757,80 @@ function StudentDashboard() {
 
       {/* ── Submit Assignment Modal ── */}
       {showSubmitModal && selectedAssignment && (
-        <Modal title={`Submit: ${selectedAssignment.title}`} onClose={() => setShowSubmitModal(false)} wide>
+        <Modal
+          title={`${selectedAssignment.submission ? "Resubmit" : "Submit"}: ${selectedAssignment.title}`}
+          onClose={() => !submitting && setShowSubmitModal(false)}
+          wide
+        >
           <div className="modal-body">
+            {submitError && <div className="alert alert-error">{submitError}</div>}
             {selectedAssignment.description && (
               <div className="assignment-desc-box">
                 <strong>Instructions:</strong>
-                <p>{selectedAssignment.description}</p>
+                <p style={{ whiteSpace: "pre-line" }}>{selectedAssignment.description}</p>
+              </div>
+            )}
+            <div className="grade-student-info">
+              <strong>Deadline:</strong> {formatDateTime(selectedAssignment.dueDate) || "None"}
+              {selectedAssignment.dueDate && ` (${timeUntil(selectedAssignment.dueDate)})`}
+              {" · "}<strong>Marks:</strong> {selectedAssignment.maxMarks ?? 100}
+              {isPastDeadline(selectedAssignment.dueDate) && (
+                <><br /><span className="deadline-soon">The deadline has passed — this submission will be marked late.</span></>
+              )}
+            </div>
+            {selectedAssignment.submission && (
+              <div className="info-box" style={{ marginBottom: "1rem" }}>
+                ⓘ Resubmitting replaces the {selectedAssignment.submission.files.length} file(s) you submitted
+                on {formatDateTime(selectedAssignment.submission.submittedAt)}.
               </div>
             )}
             <div className="form-group">
-              <label>Your Answer / Work</label>
-              <textarea
-                placeholder="Type your submission here..."
-                value={submitContent}
-                onChange={e => setSubmitContent(e.target.value)}
-                rows="10"
-                style={{ width: "100%", resize: "vertical" }}
-              />
+              <label>Files * <span className="text-muted small">(PDF or JPG · up to {MAX_FILES} files · 10 MB each, 12 MB total)</span></label>
+              <label
+                className={`drop-zone${dragging ? " dragging" : ""}`}
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={e => { e.preventDefault(); setDragging(false); addSubmitFiles(e.dataTransfer.files); }}
+              >
+                <input
+                  type="file"
+                  accept={ACCEPTED_FILE_TYPES}
+                  multiple
+                  onChange={e => { addSubmitFiles(e.target.files); e.target.value = ""; }}
+                />
+                📎 Click to choose files, or drag them here
+              </label>
+              {submitFiles.length > 0 && (
+                <div className="file-chips">
+                  {submitFiles.map((f, i) => (
+                    <span key={`${f.name}-${f.size}`} className="file-chip" style={{ cursor: "default" }}>
+                      {f.name.toLowerCase().endsWith(".pdf") ? "📄" : "🖼️"} {f.name}
+                      <span className="file-chip-size">{formatFileSize(f.size)}</span>
+                      <button type="button" className="file-chip-remove" onClick={() => removeSubmitFile(i)} title="Remove">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="form-group">
-              <label htmlFor="assignment-file">Attach a file</label>
-              <input
-                id="assignment-file"
-                type="file"
-                onChange={e => setSubmitFile(e.target.files?.[0] || null)}
+              <label>Note to your instructor <span className="text-muted small">(optional)</span></label>
+              <textarea
+                placeholder="Anything your instructor should know about this submission…"
+                value={submitContent}
+                onChange={e => setSubmitContent(e.target.value)}
+                rows="3"
+                maxLength={2000}
               />
-              <small>Optional. Maximum size: 10 MB.</small>
-              {submitFile && <small>{submitFile.name}</small>}
             </div>
           </div>
           <div className="modal-actions">
-            <button className="btn-secondary" onClick={() => setShowSubmitModal(false)}>Cancel</button>
-            <button className="btn-primary" onClick={handleSubmitAssignment} disabled={loading}>
-              {loading ? <Spinner /> : <><IconSend /> Submit</>}
+            <button className="btn-secondary" onClick={() => setShowSubmitModal(false)} disabled={submitting}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={handleSubmitAssignment}
+              disabled={submitting || Boolean(validateSubmissionFiles(submitFiles))}
+            >
+              {submitting ? <><Spinner /> Uploading…</> : <><IconSend /> {selectedAssignment.submission ? "Resubmit" : "Submit"}</>}
             </button>
           </div>
         </Modal>

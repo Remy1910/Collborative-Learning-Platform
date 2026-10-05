@@ -24,6 +24,11 @@ const quizResponseSchema = new mongoose.Schema(
         },
         studentAnswer: mongoose.Schema.Types.Mixed,
         isCorrect: Boolean,
+        // Set once faculty has manually graded a short answer
+        isGraded: {
+          type: Boolean,
+          default: false
+        },
         marksObtained: {
           type: Number,
           default: 0
@@ -58,7 +63,7 @@ const quizResponseSchema = new mongoose.Schema(
 
     violations: [
       {
-        reason: { type: String, required: true },
+        reason: { type: String, required: true, trim: true, maxlength: 200 },
         timestamp: { type: Date, default: Date.now }
       }
     ],
@@ -73,7 +78,11 @@ const quizResponseSchema = new mongoose.Schema(
 );
 
 quizResponseSchema.index({ quiz: 1, student: 1, attemptNumber: 1 }, { unique: true });
-quizResponseSchema.index({ quiz: 1, student: 1, isActive: 1 });
+// At most one active attempt per student per quiz, even if two "start" requests race
+quizResponseSchema.index(
+  { quiz: 1, student: 1 },
+  { unique: true, partialFilterExpression: { isActive: true }, name: "one_active_attempt_per_student" }
+);
 quizResponseSchema.index({ quiz: 1, status: 1 });
 quizResponseSchema.index({ student: 1, submittedAt: -1 });
 

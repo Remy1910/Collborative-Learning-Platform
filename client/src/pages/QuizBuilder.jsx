@@ -51,7 +51,6 @@ function QuizBuilder() {
     description: "",
     duration: "",
     dueDate: "",
-    totalMarks: 100,
     passMarks: 40,
     courseId: "",
   });
@@ -76,11 +75,8 @@ function QuizBuilder() {
 
   useEffect(() => {
     courseAPI.getCourses()
-      .then(data => {
-        const userId = localStorage.getItem("userId");
-        const mine = Array.isArray(data) ? data.filter(c => !c.faculty?._id || c.faculty?._id === userId || c.faculty === userId) : [];
-        setCourses(mine);
-      })
+      // The server only returns this faculty member's own courses
+      .then(data => setCourses(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, []);
 
@@ -104,8 +100,7 @@ function QuizBuilder() {
         description: quizDetails.description,
         duration: quizDetails.duration ? parseInt(quizDetails.duration) : null,
         dueDate: quizDetails.dueDate || null,
-        totalMarks: parseInt(quizDetails.totalMarks) || 100,
-        passMarks: parseInt(quizDetails.passMarks) || 40,
+        passMarks: Math.max(0, parseInt(quizDetails.passMarks) || 0),
       };
       if (quizDetails.courseId) payload.courseId = quizDetails.courseId;
 
@@ -163,7 +158,7 @@ function QuizBuilder() {
     if (!currentQuestion.questionText.trim()) { setError("Question text is required"); return false; }
     if (currentQuestion.type === "mcq") {
       if (currentQuestion.options.filter(o => o.text.trim()).length < 2) { setError("At least 2 option texts are required"); return false; }
-      if (!currentQuestion.options.some(o => o.isCorrect)) { setError("Mark at least one option as correct"); return false; }
+      if (!currentQuestion.options.some(o => o.isCorrect && o.text.trim())) { setError("Mark a filled-in option as correct"); return false; }
     }
     if (currentQuestion.type === "truefalse" && currentQuestion.correctAnswer === null) {
       setError("Select the correct answer (True or False)"); return false;
@@ -177,7 +172,7 @@ function QuizBuilder() {
 
     try {
       setLoading(true);
-      await quizAPI.addQuestion(quizId, {
+      const data = await quizAPI.addQuestion(quizId, {
         type: currentQuestion.type,
         questionText: currentQuestion.questionText,
         marks: parseInt(currentQuestion.marks) || 1,
@@ -186,7 +181,7 @@ function QuizBuilder() {
         modelAnswer:   currentQuestion.type === "shortanswer" ? currentQuestion.modelAnswer : undefined,
       });
 
-      setQuestions(prev => [...prev, { ...currentQuestion }]);
+      setQuestions(prev => [...prev, data.question]);
       setCurrentQuestion(defaultQuestion);
       setError("");
       showMsg("Question added!");
@@ -197,13 +192,28 @@ function QuizBuilder() {
     }
   };
 
-  const handleDeleteLocalQuestion = (idx) => {
-    setQuestions(prev => prev.filter((_, i) => i !== idx));
+  const handleDeleteQuestion = async (questionId) => {
+    setError("");
+    try {
+      setLoading(true);
+      await quizAPI.deleteQuestion(quizId, questionId);
+      setQuestions(prev => prev.filter(q => q._id !== questionId));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const totalMarks = questions.reduce((a, q) => a + (Number(q.marks) || 0), 0);
 
   const handlePublishQuiz = async () => {
     setError("");
     if (questions.length === 0) { setError("Add at least one question before publishing"); return; }
+    if ((parseInt(quizDetails.passMarks) || 0) > totalMarks) {
+      setError(`Pass marks (${quizDetails.passMarks}) exceed the quiz total of ${totalMarks} marks. Add questions or lower the pass marks.`);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -329,25 +339,15 @@ function QuizBuilder() {
                 </div>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Total Marks</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={quizDetails.totalMarks}
-                    onChange={e => handleDetailChange("totalMarks", e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Pass Marks</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={quizDetails.passMarks}
-                    onChange={e => handleDetailChange("passMarks", e.target.value)}
-                  />
-                </div>
+              <div className="form-group">
+                <label>Pass Marks</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={quizDetails.passMarks}
+                  onChange={e => handleDetailChange("passMarks", e.target.value)}
+                />
+                <small className="text-muted">Total marks are the sum of the question marks you add next.</small>
               </div>
             </div>
 
@@ -370,7 +370,7 @@ function QuizBuilder() {
               <div className="questions-panel-header">
                 <h3>Questions ({questions.length})</h3>
                 <span className="text-muted small">
-                  {questions.reduce((a, q) => a + (parseInt(q.marks) || 0), 0)} marks total
+                  {totalMarks} marks total
                 </span>
               </div>
 
@@ -382,14 +382,15 @@ function QuizBuilder() {
               ) : (
                 <div className="questions-list">
                   {questions.map((q, idx) => (
-                    <div key={idx} className="question-item">
+                    <div key={q._id} className="question-item">
                       <div className="question-item-header">
                         <span className="q-number">Q{idx + 1}</span>
                         <span className="q-type-tag">{QTYPES.find(t => t.value === q.type)?.icon} {q.type.toUpperCase()}</span>
                         <span className="q-marks">{q.marks}M</span>
                         <button
                           className="q-delete"
-                          onClick={() => handleDeleteLocalQuestion(idx)}
+                          onClick={() => handleDeleteQuestion(q._id)}
+                          disabled={loading}
                           title="Remove question"
                         >
                           <IconTrash />
@@ -405,7 +406,7 @@ function QuizBuilder() {
               <div className="publish-box">
                 <div className="publish-stats">
                   <div><strong>{questions.length}</strong> <span>Questions</span></div>
-                  <div><strong>{questions.reduce((a, q) => a + (parseInt(q.marks) || 0), 0)}</strong> <span>Marks</span></div>
+                  <div><strong>{totalMarks}</strong> <span>Marks</span></div>
                 </div>
                 <button
                   className="btn-primary"
@@ -528,9 +529,9 @@ function QuizBuilder() {
               {/* Short Answer */}
               {currentQuestion.type === "shortanswer" && (
                 <div className="form-group">
-                  <label>Model Answer <span className="text-muted">(optional — shown as hint)</span></label>
+                  <label>Model Answer <span className="text-muted">(optional — your grading reference, hidden from students)</span></label>
                   <textarea
-                    placeholder="Provide an example or hint for expected answer..."
+                    placeholder="Describe the answer you expect..."
                     value={currentQuestion.modelAnswer}
                     onChange={e => handleQuestionChange("modelAnswer", e.target.value)}
                     rows="3"
@@ -561,7 +562,7 @@ function QuizBuilder() {
                 <div className="s-lbl">Questions</div>
               </div>
               <div className="success-stat">
-                <div className="s-num">{quizDetails.totalMarks}</div>
+                <div className="s-num">{totalMarks}</div>
                 <div className="s-lbl">Total Marks</div>
               </div>
               <div className="success-stat">
@@ -570,7 +571,7 @@ function QuizBuilder() {
               </div>
             </div>
             <div className="success-actions">
-              <button className="btn-secondary" onClick={() => { setStep(1); setQuizDetails({ title:"",subject:"",description:"",duration:"",dueDate:"",totalMarks:100,passMarks:40,courseId:"" }); setQuestions([]); setQuizId(null); }}>
+              <button className="btn-secondary" onClick={() => { setStep(1); setQuizDetails({ title:"",subject:"",description:"",duration:"",dueDate:"",passMarks:40,courseId:"" }); setQuestions([]); setQuizId(null); }}>
                 Create Another Quiz
               </button>
               <button className="btn-primary" onClick={() => navigate("/faculty/dashboard")}>

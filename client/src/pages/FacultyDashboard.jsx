@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, getSubmissionFile } from "../utils/api";
+import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, openSubmissionFile } from "../utils/api";
+import {
+  formatDateTime, formatFileSize, isPastDeadline, timeUntil, toDateTimeLocal, SUBMISSION_STATUS
+} from "../utils/assignments";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -42,10 +45,10 @@ const IconBell = () => (
 );
 
 // ── Modal wrapper ──────────────────────────────────────────────────────────
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, wide }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className={`modal${wide ? " modal-wide" : ""}`} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="modal-close" onClick={onClose}><IconX /></button>
@@ -69,9 +72,8 @@ function FacultyDashboard() {
   // Data
   const [quizzes, setQuizzes] = useState([]);
   const [courses, setCourses] = useState([]);
-  const [assignments, setAssignments] = useState([]);
   const [submissions, setSubmissions] = useState([]);
-  const [stats, setStats] = useState({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0 });
+  const [stats, setStats] = useState({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0, pendingGrading: 0 });
 
   // Loading / Error
   const [loading, setLoading] = useState(false);
@@ -86,12 +88,24 @@ function FacultyDashboard() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
+  // Assignment being edited in the create/edit modal (null = creating a new one)
+  const [editingAssignment, setEditingAssignment] = useState(null);
   const [selectedQuiz, setSelectedQuiz] = useState(null);
 
   // ── Quiz submissions ──
   const [showQuizSubmissionsModal, setShowQuizSubmissionsModal] = useState(false);
   const [quizSubmissions, setQuizSubmissions] = useState([]);
   const [quizSubmissionsLoading, setQuizSubmissionsLoading] = useState(false);
+  const [quizStats, setQuizStats] = useState(null);
+
+  // ── Quiz attempt review / short-answer grading ──
+  const [reviewResponse, setReviewResponse] = useState(null);
+  const [reviewMarks, setReviewMarks] = useState({});
+  const [gradingQuestionId, setGradingQuestionId] = useState(null);
+
+  const [quizFilter, setQuizFilter] = useState("all");
+  // Bumped after creating/editing/deleting an assignment so the per-course lists refetch
+  const [assignmentsVersion, setAssignmentsVersion] = useState(0);
 
   // ── Notices ──
   const [notices, setNotices] = useState([]);
@@ -102,8 +116,9 @@ function FacultyDashboard() {
 
   // Forms
   const [courseForm, setCourseForm] = useState({ title: '', description: '' });
-  const [assignmentForm, setAssignmentForm] = useState({ title: '', description: '', courseId: '', dueDate: '' });
-  const [gradeForm, setGradeForm] = useState({ marks: '' });
+  const emptyAssignmentForm = { title: "", description: "", courseId: "", dueDate: "", maxMarks: "100", allowLateSubmissions: false };
+  const [assignmentForm, setAssignmentForm] = useState(emptyAssignmentForm);
+  const [gradeForm, setGradeForm] = useState({ marks: "", feedback: "" });
   const [assignCourseId, setAssignCourseId] = useState('');
 
   useEffect(() => { loadAll(); }, []);
@@ -116,14 +131,13 @@ function FacultyDashboard() {
       const [qData, cData, sData, nData] = await Promise.all([
         quizAPI.getMyQuizzes().catch(() => []),
         courseAPI.getCourses().catch(() => []),
-        assignmentAPI.getStats().catch(() => ({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0 })),
+        assignmentAPI.getStats().catch(() => ({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0, pendingGrading: 0 })),
         noticeAPI.getMyNotices().catch(() => []),
       ]);
       setQuizzes(Array.isArray(qData) ? qData : []);
-      // Only show courses belonging to this faculty
-      const userId = localStorage.getItem("userId");
-      setCourses(Array.isArray(cData) ? cData.filter(c => !c.faculty?._id || c.faculty?._id === userId || c.faculty === userId) : []);
-      setStats(sData || { totalCourses: 0, totalAssignments: 0, totalSubmissions: 0 });
+      // The server only returns this faculty member's own courses
+      setCourses(Array.isArray(cData) ? cData : []);
+      setStats(sData || { totalCourses: 0, totalAssignments: 0, totalSubmissions: 0, pendingGrading: 0 });
       setNotices(Array.isArray(nData) ? nData : []);
     } catch (err) {
       setError("Failed to load dashboard data");
@@ -186,16 +200,59 @@ function FacultyDashboard() {
     }
   };
 
-  // ── Create Assignment ─────────────────────────────────────────────────
-  const handleCreateAssignment = async () => {
-    if (!assignmentForm.title.trim()) { setError("Assignment title is required"); return; }
+  // ── Create / Edit Assignment ──────────────────────────────────────────
+  const openCreateAssignment = (courseId = "") => {
+    setEditingAssignment(null);
+    setAssignmentForm({ ...emptyAssignmentForm, courseId });
+    setError("");
+    setShowCreateAssignment(true);
+  };
+
+  const openEditAssignment = (assignment) => {
+    setEditingAssignment(assignment);
+    setAssignmentForm({
+      title: assignment.title,
+      description: assignment.description || "",
+      courseId: assignment.course?._id || assignment.course,
+      dueDate: toDateTimeLocal(assignment.dueDate),
+      maxMarks: String(assignment.maxMarks ?? 100),
+      allowLateSubmissions: Boolean(assignment.allowLateSubmissions),
+    });
+    setError("");
+    setShowCreateAssignment(true);
+  };
+
+  const handleSaveAssignment = async () => {
+    const maxMarks = Number(assignmentForm.maxMarks);
+    if (assignmentForm.title.trim().length < 3) { setError("Assignment title must be at least 3 characters"); return; }
     if (!assignmentForm.courseId) { setError("Please select a course"); return; }
+    if (!assignmentForm.dueDate) { setError("Please set a deadline"); return; }
+    if (!editingAssignment && new Date(assignmentForm.dueDate) <= new Date()) { setError("The deadline must be in the future"); return; }
+    if (!Number.isFinite(maxMarks) || maxMarks < 1 || maxMarks > 1000) { setError("Maximum marks must be between 1 and 1000"); return; }
+
+    const payload = {
+      title: assignmentForm.title.trim(),
+      description: assignmentForm.description,
+      // datetime-local has no time zone; send an exact instant so the server doesn't reinterpret it
+      dueDate: new Date(assignmentForm.dueDate).toISOString(),
+      maxMarks,
+      allowLateSubmissions: assignmentForm.allowLateSubmissions,
+    };
+
     try {
       setLoading(true);
-      await assignmentAPI.createAssignment(assignmentForm);
+      if (editingAssignment) {
+        await assignmentAPI.updateAssignment(editingAssignment._id, payload);
+      } else {
+        await assignmentAPI.createAssignment({ ...payload, courseId: assignmentForm.courseId });
+      }
       setShowCreateAssignment(false);
-      setAssignmentForm({ title: "", description: "", courseId: "", dueDate: "" });
-      showMsg("Assignment created successfully!");
+      setError("");
+      setAssignmentForm(emptyAssignmentForm);
+      setAssignmentsVersion(v => v + 1);
+      showMsg(editingAssignment ? "Assignment updated!" : "Assignment created successfully!");
+      setEditingAssignment(null);
+      loadAll();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -203,12 +260,28 @@ function FacultyDashboard() {
     }
   };
 
+  // ── Delete Assignment ─────────────────────────────────────────────────
+  const handleDeleteAssignment = async (assignment) => {
+    const warning = assignment.submittedCount
+      ? `Delete "${assignment.title}"? This also permanently deletes ${assignment.submittedCount} student submission(s) and their grades.`
+      : `Delete "${assignment.title}"?`;
+    if (!window.confirm(warning)) return;
+    try {
+      await assignmentAPI.deleteAssignment(assignment._id);
+      setAssignmentsVersion(v => v + 1);
+      showMsg("Assignment deleted.");
+      loadAll();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // ── View Submissions ──────────────────────────────────────────────────
   const handleViewSubmissions = async (assignment) => {
-    setSelectedAssignment(assignment);
     try {
       const data = await assignmentAPI.getSubmissions(assignment._id);
-      setSubmissions(Array.isArray(data) ? data : []);
+      setSelectedAssignment({ ...assignment, ...data.assignment });
+      setSubmissions(Array.isArray(data.submissions) ? data.submissions : []);
       setShowSubmissionsModal(true);
     } catch (err) {
       setError(err.message);
@@ -216,27 +289,41 @@ function FacultyDashboard() {
   };
 
   // ── Grade Submission ──────────────────────────────────────────────────
+  const openGradeModal = (submission) => {
+    setSelectedSubmission(submission);
+    setGradeForm({
+      marks: submission.marks !== null && submission.marks !== undefined ? String(submission.marks) : "",
+      feedback: submission.feedback || "",
+    });
+    setError("");
+    setShowGradeModal(true);
+  };
+
   const handleGrade = async () => {
+    const maxMarks = selectedAssignment?.maxMarks ?? 100;
     const marks = parseFloat(gradeForm.marks);
-    if (isNaN(marks) || marks < 0 || marks > 100) { setError("Marks must be between 0 and 100"); return; }
+    if (isNaN(marks) || marks < 0 || marks > maxMarks) { setError(`Marks must be between 0 and ${maxMarks}`); return; }
     try {
-      await assignmentAPI.gradeSubmission({ submissionId: selectedSubmission._id, marks });
+      setLoading(true);
+      await assignmentAPI.gradeSubmission({ submissionId: selectedSubmission._id, marks, feedback: gradeForm.feedback });
       setShowGradeModal(false);
-      setGradeForm({ marks: "" });
+      setError("");
+      setGradeForm({ marks: "", feedback: "" });
       showMsg("Marks assigned successfully!");
+      setAssignmentsVersion(v => v + 1);
       handleViewSubmissions(selectedAssignment);
+      loadAll();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleOpenAttachment = async (submissionId) => {
-    const attachmentWindow = window.open("about:blank", "_blank");
+  const handleOpenAttachment = async (submissionId, fileId) => {
     try {
-      const blob = await getSubmissionFile(submissionId);
-      attachmentWindow.location.href = URL.createObjectURL(blob);
+      await openSubmissionFile(submissionId, fileId);
     } catch (err) {
-      attachmentWindow.close();
       setError(err.message);
     }
   };
@@ -267,12 +354,50 @@ function FacultyDashboard() {
     setShowQuizSubmissionsModal(true);
     setQuizSubmissionsLoading(true);
     try {
-      const data = await quizAPI.getSubmissions(quiz._id);
+      const [data, stats] = await Promise.all([
+        quizAPI.getSubmissions(quiz._id),
+        quizAPI.getStats(quiz._id),
+      ]);
       setQuizSubmissions(Array.isArray(data.submissions) ? data.submissions : []);
+      setQuizStats(stats);
     } catch (err) {
       setError(err.message);
     } finally {
       setQuizSubmissionsLoading(false);
+    }
+  };
+
+  // ── Review a quiz attempt ─────────────────────────────────────────────
+  const handleOpenReview = async (responseId) => {
+    try {
+      const data = await quizAPI.getResponseDetails(responseId);
+      setReviewResponse(data);
+      const marks = {};
+      data.responses.forEach(r => {
+        if (r.question?.type === "shortanswer") marks[r.question._id] = String(r.marksObtained ?? 0);
+      });
+      setReviewMarks(marks);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleGradeShortAnswer = async (questionId, maxMarks) => {
+    const marks = parseFloat(reviewMarks[questionId]);
+    if (isNaN(marks) || marks < 0 || marks > maxMarks) {
+      setError(`Marks must be between 0 and ${maxMarks}`);
+      return;
+    }
+    setGradingQuestionId(questionId);
+    try {
+      await quizAPI.gradeShortAnswer(reviewResponse._id, { questionId, marksObtained: marks });
+      showMsg("Answer graded.");
+      await handleOpenReview(reviewResponse._id);
+      handleViewQuizSubmissions(selectedQuiz);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGradingQuestionId(null);
     }
   };
 
@@ -319,6 +444,14 @@ function FacultyDashboard() {
   const activeQuizzes = quizzes.filter(q => q.status === "active").length;
   const draftQuizzes = quizzes.filter(q => q.status === "draft").length;
   const publishedCount = quizzes.filter(q => q.isPublished).length;
+
+  const QUIZ_FILTERS = [
+    { id: "all", label: "All", count: quizzes.length, match: () => true },
+    { id: "active", label: "Active", count: activeQuizzes, match: q => q.status === "active" },
+    { id: "draft", label: "Draft", count: draftQuizzes, match: q => q.status === "draft" },
+    { id: "published", label: "Published", count: publishedCount, match: q => q.isPublished },
+  ];
+  const filteredQuizzes = quizzes.filter(QUIZ_FILTERS.find(f => f.id === quizFilter).match);
 
   return (
     <div className="dashboard-container">
@@ -383,6 +516,7 @@ function FacultyDashboard() {
                 { label: "Total Quizzes", value: quizzes.length, color: "#7c3aed", icon: "📝" },
                 { label: "Active Quizzes", value: activeQuizzes, color: "#059669", icon: "✅" },
                 { label: "Assignments", value: stats.totalAssignments, color: "#d97706", icon: "📋" },
+                { label: "Submissions to Grade", value: stats.pendingGrading || 0, color: "#dc2626", icon: "🖊️" },
               ].map(s => (
                 <div key={s.label} className="stat-card" style={{ borderTop: `4px solid ${s.color}` }}>
                   <div className="stat-icon">{s.icon}</div>
@@ -489,7 +623,7 @@ function FacultyDashboard() {
                     <div className="course-actions">
                       <button
                         className="btn-secondary btn-small"
-                        onClick={() => { setAssignmentForm(f => ({ ...f, courseId: course._id })); setShowCreateAssignment(true); }}
+                        onClick={() => openCreateAssignment(course._id)}
                       >
                         <IconPlus /> Add Assignment
                       </button>
@@ -516,10 +650,16 @@ function FacultyDashboard() {
 
             <div className="filter-bar">
               <div className="filter-chips">
-                <span className="filter-chip active">All ({quizzes.length})</span>
-                <span className="filter-chip">Active ({activeQuizzes})</span>
-                <span className="filter-chip">Draft ({draftQuizzes})</span>
-                <span className="filter-chip">Published ({publishedCount})</span>
+                {QUIZ_FILTERS.map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`filter-chip ${quizFilter === f.id ? "active" : ""}`}
+                    onClick={() => setQuizFilter(f.id)}
+                  >
+                    {f.label} ({f.count})
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -547,7 +687,10 @@ function FacultyDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {quizzes.map(quiz => (
+                    {filteredQuizzes.length === 0 && (
+                      <tr><td colSpan="7" className="text-center text-muted">No quizzes match this filter</td></tr>
+                    )}
+                    {filteredQuizzes.map(quiz => (
                       <tr key={quiz._id}>
                         <td>
                           <div className="quiz-title-cell">{quiz.title}</div>
@@ -605,7 +748,7 @@ function FacultyDashboard() {
               </div>
               <button
                 className="btn-primary"
-                onClick={() => setShowCreateAssignment(true)}
+                onClick={() => openCreateAssignment()}
                 disabled={courses.length === 0}
                 title={courses.length === 0 ? "Create a course first" : ""}
               >
@@ -633,7 +776,7 @@ function FacultyDashboard() {
                       </div>
                       <button
                         className="btn-secondary btn-small"
-                        onClick={() => { setAssignmentForm(f => ({ ...f, courseId: course._id })); setShowCreateAssignment(true); }}
+                        onClick={() => openCreateAssignment(course._id)}
                       >
                         <IconPlus /> Add Assignment
                       </button>
@@ -641,7 +784,10 @@ function FacultyDashboard() {
 
                     <AssignmentList
                       courseId={course._id}
+                      refreshKey={assignmentsVersion}
                       onViewSubmissions={handleViewSubmissions}
+                      onEdit={openEditAssignment}
+                      onDelete={handleDeleteAssignment}
                     />
                   </div>
                 ))}
@@ -778,10 +924,14 @@ function FacultyDashboard() {
         </Modal>
       )}
 
-      {/* Create Assignment Modal */}
+      {/* Create / Edit Assignment Modal */}
       {showCreateAssignment && (
-        <Modal title="Create Assignment" onClose={() => setShowCreateAssignment(false)}>
+        <Modal
+          title={editingAssignment ? "Edit Assignment" : "Create Assignment"}
+          onClose={() => { setShowCreateAssignment(false); setEditingAssignment(null); }}
+        >
           <div className="modal-body">
+            {error && <div className="alert alert-error" onClick={() => setError("")}>{error} <span>✕</span></div>}
             <div className="form-group">
               <label>Assignment Title *</label>
               <input
@@ -796,33 +946,58 @@ function FacultyDashboard() {
               <select
                 value={assignmentForm.courseId}
                 onChange={e => setAssignmentForm(f => ({ ...f, courseId: e.target.value }))}
+                disabled={Boolean(editingAssignment)}
               >
                 <option value="">Select a course…</option>
                 {courses.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}
               </select>
             </div>
             <div className="form-group">
-              <label>Description</label>
+              <label>Instructions</label>
               <textarea
-                placeholder="Assignment instructions and details..."
+                placeholder="What should students do and submit?"
                 value={assignmentForm.description}
                 onChange={e => setAssignmentForm(f => ({ ...f, description: e.target.value }))}
                 rows="4"
+                maxLength={2000}
               />
             </div>
-            <div className="form-group">
-              <label>Due Date</label>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Deadline *</label>
+                <input
+                  type="datetime-local"
+                  value={assignmentForm.dueDate}
+                  min={editingAssignment ? undefined : toDateTimeLocal(new Date())}
+                  onChange={e => setAssignmentForm(f => ({ ...f, dueDate: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Maximum Marks *</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={assignmentForm.maxMarks}
+                  onChange={e => setAssignmentForm(f => ({ ...f, maxMarks: e.target.value }))}
+                />
+              </div>
+            </div>
+            <label className="checkbox-row">
               <input
-                type="datetime-local"
-                value={assignmentForm.dueDate}
-                onChange={e => setAssignmentForm(f => ({ ...f, dueDate: e.target.value }))}
+                type="checkbox"
+                checked={assignmentForm.allowLateSubmissions}
+                onChange={e => setAssignmentForm(f => ({ ...f, allowLateSubmissions: e.target.checked }))}
               />
-            </div>
+              <span>Allow late submissions <span className="text-muted small">(accepted after the deadline and marked late)</span></span>
+            </label>
           </div>
           <div className="modal-actions">
-            <button className="btn-secondary" onClick={() => setShowCreateAssignment(false)}>Cancel</button>
-            <button className="btn-primary" onClick={handleCreateAssignment} disabled={loading}>
-              {loading ? <><Spinner /> Creating…</> : <><IconCheck /> Create Assignment</>}
+            <button className="btn-secondary" onClick={() => { setShowCreateAssignment(false); setEditingAssignment(null); }}>Cancel</button>
+            <button className="btn-primary" onClick={handleSaveAssignment} disabled={loading}>
+              {loading
+                ? <><Spinner /> Saving…</>
+                : <><IconCheck /> {editingAssignment ? "Save Changes" : "Create Assignment"}</>}
             </button>
           </div>
         </Modal>
@@ -833,43 +1008,59 @@ function FacultyDashboard() {
         <Modal
           title={`Submissions — ${selectedAssignment.title}`}
           onClose={() => setShowSubmissionsModal(false)}
+          wide
         >
           <div className="modal-body">
+            <div className="grade-student-info">
+              <strong>Deadline:</strong> {formatDateTime(selectedAssignment.dueDate) || "None"}
+              {selectedAssignment.dueDate && ` (${timeUntil(selectedAssignment.dueDate)})`}
+              {selectedAssignment.allowLateSubmissions && " · late submissions allowed"}<br />
+              <strong>Submitted:</strong> {submissions.filter(s => s.status !== "not_submitted").length} of {submissions.length}
+              {" · "}<strong>Graded:</strong> {submissions.filter(s => s.status === "graded").length}
+              {" · "}<strong>Max marks:</strong> {selectedAssignment.maxMarks}
+            </div>
             {submissions.length === 0 ? (
               <div className="empty-mini">No students are enrolled in this course.</div>
             ) : (
               <div className="submissions-list">
-                {submissions.map(sub => (
-                  <div key={sub._id} className="submission-item">
-                    <div className="submission-info">
-                      <div className="student-name">{sub.student?.name || "Student"}</div>
-                      {sub.status === "not_submitted" ? (
-                        <div className="submission-content">Not submitted</div>
-                      ) : (
-                        <div className="submission-content">{sub.content?.slice(0, 120)}{sub.content ? "…" : "No written content"}</div>
-                      )}
-                      {sub.file?.originalName && (
-                        <button type="button" className="btn-link" onClick={() => handleOpenAttachment(sub._id)}>
-                          Open attachment: {sub.file.originalName}
-                        </button>
-                      )}
+                {submissions.map(sub => {
+                  const status = SUBMISSION_STATUS[sub.status] || SUBMISSION_STATUS.submitted;
+                  return (
+                    <div key={sub._id} className="submission-item">
+                      <div className="submission-info">
+                        <div className="student-name">
+                          {sub.student?.name || "Student"}{" "}
+                          <span className={`badge ${status.badge}`}>{status.label}</span>
+                        </div>
+                        {sub.status !== "not_submitted" && (
+                          <>
+                            <div className="submission-content">
+                              {formatDateTime(sub.submittedAt)}
+                              {sub.attemptCount > 1 && ` · attempt ${sub.attemptCount}`}
+                              {sub.isLate && sub.status === "graded" && " · late"}
+                            </div>
+                            {sub.note && <div className="submission-content">“{sub.note}”</div>}
+                            <SubmissionFiles submission={sub} onOpen={handleOpenAttachment} />
+                          </>
+                        )}
+                      </div>
+                      <div className="submission-right">
+                        {sub.status === "not_submitted" ? null : sub.status === "graded" ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <span className="marks-badge">{sub.marks}/{selectedAssignment.maxMarks}</span>
+                            <button className="btn-small btn-secondary" onClick={() => openGradeModal(sub)} title="Change grade">
+                              <IconEdit />
+                            </button>
+                          </div>
+                        ) : (
+                          <button className="btn-small btn-primary" onClick={() => openGradeModal(sub)}>
+                            Grade
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="submission-right">
-                      {sub.status === "not_submitted" ? (
-                        <span className="badge badge-warning">Not submitted</span>
-                      ) : sub.marks !== null && sub.marks !== undefined ? (
-                        <span className="marks-badge">{sub.marks}/100</span>
-                      ) : (
-                        <button
-                          className="btn-small btn-primary"
-                          onClick={() => { setSelectedSubmission(sub); setShowGradeModal(true); }}
-                        >
-                          Grade
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -883,37 +1074,50 @@ function FacultyDashboard() {
       {showGradeModal && selectedSubmission && (
         <Modal title="Grade Submission" onClose={() => setShowGradeModal(false)}>
           <div className="modal-body">
+            {error && <div className="alert alert-error" onClick={() => setError("")}>{error} <span>✕</span></div>}
             <div className="grade-student-info">
               <strong>Student:</strong> {selectedSubmission.student?.name}<br />
-              <strong>Submitted:</strong> {new Date(selectedSubmission.createdAt).toLocaleDateString()}
+              <strong>Submitted:</strong> {formatDateTime(selectedSubmission.submittedAt)}
+              {selectedSubmission.isLate && <span className="badge badge-warning" style={{ marginLeft: "0.5rem" }}>Late</span>}
+              {selectedSubmission.attemptCount > 1 && ` · attempt ${selectedSubmission.attemptCount}`}
             </div>
-            <div className="submission-preview">
-              <label>Submission Content</label>
-              <div className="submission-text">{selectedSubmission.content}</div>
-            </div>
-            {selectedSubmission.file?.originalName && (
-              <p>
-                <button type="button" className="btn-link" onClick={() => handleOpenAttachment(selectedSubmission._id)}>
-                  Open attachment: {selectedSubmission.file.originalName}
-                </button>
-              </p>
+            {selectedSubmission.note && (
+              <div className="submission-preview">
+                <label>Student's note</label>
+                <div className="submission-text">{selectedSubmission.note}</div>
+              </div>
             )}
+            <div className="submission-preview" style={{ marginTop: "1rem" }}>
+              <label>Files</label>
+              <SubmissionFiles submission={selectedSubmission} onOpen={handleOpenAttachment} />
+            </div>
             <div className="form-group" style={{ marginTop: "1.5rem" }}>
-              <label>Marks (0–100) *</label>
+              <label>Marks (0–{selectedAssignment?.maxMarks ?? 100}) *</label>
               <input
                 type="number"
                 min="0"
-                max="100"
+                max={selectedAssignment?.maxMarks ?? 100}
+                step="0.5"
                 placeholder="Enter marks"
                 value={gradeForm.marks}
-                onChange={e => setGradeForm({ marks: e.target.value })}
+                onChange={e => setGradeForm(f => ({ ...f, marks: e.target.value }))}
+              />
+            </div>
+            <div className="form-group">
+              <label>Feedback <span className="text-muted small">(optional, visible to the student)</span></label>
+              <textarea
+                rows="4"
+                maxLength={2000}
+                placeholder="What was good, what to improve…"
+                value={gradeForm.feedback}
+                onChange={e => setGradeForm(f => ({ ...f, feedback: e.target.value }))}
               />
             </div>
           </div>
           <div className="modal-actions">
             <button className="btn-secondary" onClick={() => setShowGradeModal(false)}>Cancel</button>
-            <button className="btn-primary" onClick={handleGrade}>
-              <IconCheck /> Submit Grade
+            <button className="btn-primary" onClick={handleGrade} disabled={loading}>
+              <IconCheck /> {selectedSubmission.status === "graded" ? "Update Grade" : "Submit Grade"}
             </button>
           </div>
         </Modal>
@@ -1052,6 +1256,26 @@ function FacultyDashboard() {
           onClose={() => setShowQuizSubmissionsModal(false)}
         >
           <div className="modal-body">
+            {!quizSubmissionsLoading && quizStats && (
+              <div className="results-summary" style={{ marginBottom: "1rem" }}>
+                <div className="summary-stat">
+                  <div className="summary-val">{quizStats.totalSubmitted}/{quizStats.totalAssigned}</div>
+                  <div className="summary-lbl">Submitted</div>
+                </div>
+                <div className="summary-stat">
+                  <div className="summary-val">{quizStats.avgScore}/{quizStats.totalMarks}</div>
+                  <div className="summary-lbl">Avg Score</div>
+                </div>
+                <div className="summary-stat">
+                  <div className="summary-val">{quizStats.highestScore} / {quizStats.lowestScore}</div>
+                  <div className="summary-lbl">High / Low</div>
+                </div>
+                <div className="summary-stat">
+                  <div className="summary-val">{quizStats.passRate}%</div>
+                  <div className="summary-lbl">Pass Rate</div>
+                </div>
+              </div>
+            )}
             {quizSubmissionsLoading ? (
               <Spinner />
             ) : quizSubmissions.length === 0 ? (
@@ -1077,8 +1301,14 @@ function FacultyDashboard() {
                     </div>
                     <div className="submission-right" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                       <span className="marks-badge">
-                        {sub.totalMarksObtained} {sub.isPassed ? "✓" : "✗"}
+                        {sub.totalMarksObtained}/{selectedQuiz.totalMarks} {sub.isPassed ? "✓" : "✗"}
                       </span>
+                      <button
+                        className="btn-small btn-primary"
+                        onClick={() => handleOpenReview(sub._id)}
+                      >
+                        Review
+                      </button>
                       {sub.status === "terminated" && (
                         <button
                           className="btn-small btn-secondary"
@@ -1099,12 +1329,101 @@ function FacultyDashboard() {
         </Modal>
       )}
 
+      {/* Quiz Attempt Review Modal */}
+      {reviewResponse && (
+        <Modal
+          title={`Review — ${reviewResponse.student?.name || "Student"}`}
+          onClose={() => setReviewResponse(null)}
+        >
+          <div className="modal-body">
+            <div className="grade-student-info">
+              <strong>Score:</strong> {reviewResponse.totalMarksObtained}/{reviewResponse.quiz?.totalMarks}
+              {" "}({reviewResponse.isPassed ? "passed" : "not passed"}, pass mark {reviewResponse.quiz?.passMarks})<br />
+              <strong>Status:</strong> {reviewResponse.status === "terminated" ? "Auto-submitted (proctoring violations)" : reviewResponse.status}
+            </div>
+            <div className="submissions-list">
+              {reviewResponse.responses.map((r, idx) => {
+                const q = r.question;
+                if (!q) return null;
+                const answered = r.studentAnswer !== null && r.studentAnswer !== undefined && r.studentAnswer !== "";
+                const correct = q.type === "mcq"
+                  ? q.options?.find(o => o.isCorrect)?.text
+                  : q.type === "truefalse" ? String(q.correctAnswer) : null;
+                return (
+                  <div key={q._id} className="submission-item" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                    <div className="student-name">Q{idx + 1}. {q.questionText}</div>
+                    <div className="submission-content">
+                      <strong>Answer:</strong> {answered ? String(r.studentAnswer) : <em>No answer</em>}
+                    </div>
+                    {correct !== null && (
+                      <div className="submission-content"><strong>Correct:</strong> {correct}</div>
+                    )}
+                    {q.type === "shortanswer" && q.modelAnswer && (
+                      <div className="submission-content"><strong>Model answer:</strong> {q.modelAnswer}</div>
+                    )}
+                    {q.type === "shortanswer" ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" }}>
+                        <input
+                          type="number"
+                          min="0"
+                          max={q.marks}
+                          value={reviewMarks[q._id] ?? ""}
+                          onChange={e => setReviewMarks(m => ({ ...m, [q._id]: e.target.value }))}
+                          style={{ maxWidth: "90px" }}
+                        />
+                        <span className="text-muted small">/ {q.marks}</span>
+                        <button
+                          className="btn-small btn-primary"
+                          onClick={() => handleGradeShortAnswer(q._id, q.marks)}
+                          disabled={gradingQuestionId === q._id}
+                        >
+                          {gradingQuestionId === q._id ? "Saving…" : r.isGraded ? "Update" : "Save"}
+                        </button>
+                        {!r.isGraded && <span className="badge badge-warning">Needs grading</span>}
+                      </div>
+                    ) : (
+                      <div className="submission-content">
+                        <span className="marks-badge">{r.marksObtained}/{q.marks}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={() => setReviewResponse(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+    </div>
+  );
+}
+
+// ── Sub-component: links to a submission's files ─────────────────────────
+function SubmissionFiles({ submission, onOpen }) {
+  if (!submission.files?.length) return <div className="submission-content">No files</div>;
+  return (
+    <div className="file-chips">
+      {submission.files.map(file => (
+        <button
+          key={file._id}
+          type="button"
+          className="file-chip"
+          onClick={() => onOpen(submission._id, file._id)}
+          title={`Open ${file.originalName}`}
+        >
+          {file.mimeType === "application/pdf" ? "📄" : "🖼️"} {file.originalName}
+          <span className="file-chip-size">{formatFileSize(file.size)}</span>
+        </button>
+      ))}
     </div>
   );
 }
 
 // ── Sub-component: Assignment List per course ────────────────────────────
-function AssignmentList({ courseId, onViewSubmissions }) {
+function AssignmentList({ courseId, refreshKey, onViewSubmissions, onEdit, onDelete }) {
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1123,7 +1442,7 @@ function AssignmentList({ courseId, onViewSubmissions }) {
       });
 
     return () => { active = false; };
-  }, [courseId]);
+  }, [courseId, refreshKey]);
 
   if (loading) return <div style={{ padding: "1rem" }}><div className="spinner-ring" /></div>;
 
@@ -1134,19 +1453,42 @@ function AssignmentList({ courseId, onViewSubmissions }) {
   }
 
   return <div className="assignment-list">
-    {assignments.map(assignment => (
-      <div key={assignment._id} className="assignment-row">
-        <div>
-          <strong>{assignment.title}</strong>
-          <div className="text-muted small">
-            {assignment.dueDate ? `Due: ${new Date(assignment.dueDate).toLocaleDateString()}` : "No due date"}
+    {assignments.map(assignment => {
+      const closed = isPastDeadline(assignment.dueDate);
+      const toGrade = assignment.submittedCount - assignment.gradedCount;
+      return (
+        <div key={assignment._id} className="assignment-row">
+          <div>
+            <strong>{assignment.title}</strong>{" "}
+            {closed
+              ? <span className="badge badge-notStarted">{assignment.allowLateSubmissions ? "Past due · late allowed" : "Closed"}</span>
+              : <span className="badge badge-active">Open</span>}
+            <div className="text-muted small">
+              {assignment.dueDate ? `Deadline: ${formatDateTime(assignment.dueDate)}` : "No deadline"}
+              {!closed && assignment.dueDate && ` (${timeUntil(assignment.dueDate)})`}
+              {` · ${assignment.maxMarks ?? 100} marks`}
+            </div>
+            <div className="text-muted small">
+              {assignment.submittedCount}/{assignment.totalStudents} submitted
+              {` · ${assignment.gradedCount} graded`}
+              {assignment.lateCount > 0 && ` · ${assignment.lateCount} late`}
+              {toGrade > 0 && <strong style={{ color: "var(--danger)" }}>{` · ${toGrade} to grade`}</strong>}
+            </div>
+          </div>
+          <div className="actions">
+            <button className="btn-primary btn-small" onClick={() => onViewSubmissions(assignment)}>
+              Submissions
+            </button>
+            <button className="btn-secondary btn-small" onClick={() => onEdit(assignment)} title="Edit assignment">
+              <IconEdit />
+            </button>
+            <button className="btn-small btn-danger" onClick={() => onDelete(assignment)} title="Delete assignment">
+              <IconTrash />
+            </button>
           </div>
         </div>
-        <button className="btn-secondary btn-small" onClick={() => onViewSubmissions(assignment)}>
-          View Submissions
-        </button>
-      </div>
-    ))}
+      );
+    })}
   </div>;
 }
 
