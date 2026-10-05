@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
@@ -37,6 +38,16 @@ function GuestRoute({ children }) {
 }
 
 function App() {
+  // All tabs share one login (localStorage). If another tab signs in as someone else or
+  // signs out, reload so this tab doesn't keep showing one user while acting as another.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "token" || e.key === null) window.location.reload();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   return (
     <Router>
       <Routes>

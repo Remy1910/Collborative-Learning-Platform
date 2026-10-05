@@ -92,9 +92,12 @@ function StudentDashboard() {
 
   const showMsg = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(""), 3500); };
 
-  const loadTabData = async () => {
-    setLoading(true);
-    setError("");
+  // silent: refresh in the background without the loading spinner or clearing alerts
+  const loadTabData = async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setError("");
+    }
     try {
       if (activeTab === "dashboard" || activeTab === "my-quizzes") {
         const q = await quizAPI.getAssignedQuizzes().catch(() => []);
@@ -104,7 +107,8 @@ function StudentDashboard() {
         const r = await quizAPI.getMyResults().catch(() => []);
         setResults(Array.isArray(r) ? r : []);
       }
-      if (activeTab === "courses") {
+      // The dashboard's "Enrolled Courses" card needs the course list too
+      if (activeTab === "courses" || activeTab === "dashboard") {
         const c = await courseAPI.getCourses().catch(() => []);
         setCourses(Array.isArray(c) ? c : []);
       }
@@ -113,11 +117,25 @@ function StudentDashboard() {
         setAssignments(Array.isArray(a) ? a : []);
       }
     } catch (err) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  // Refetch when the student comes back to this window, so courses, quizzes and
+  // assignments that faculty created in the meantime show up without a reload
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") loadTabData({ silent: true });
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [activeTab]);
 
   // Also load results and notices for dashboard quick view
   useEffect(() => {
