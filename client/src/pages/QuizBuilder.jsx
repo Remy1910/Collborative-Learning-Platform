@@ -136,12 +136,7 @@ function QuizBuilder() {
 
   const handleOptionChange = (index, field, value) => {
     const newOptions = [...currentQuestion.options];
-    // For radio-style correct (single correct), uncheck others if checking this one
-    if (field === "isCorrect" && value === true) {
-      newOptions.forEach((o, i) => { newOptions[i] = { ...o, isCorrect: i === index }; });
-    } else {
-      newOptions[index] = { ...newOptions[index], [field]: value };
-    }
+    newOptions[index] = { ...newOptions[index], [field]: value };
     setCurrentQuestion(prev => ({ ...prev, options: newOptions }));
   };
 
@@ -158,7 +153,9 @@ function QuizBuilder() {
     if (!currentQuestion.questionText.trim()) { setError("Question text is required"); return false; }
     if (currentQuestion.type === "mcq") {
       if (currentQuestion.options.filter(o => o.text.trim()).length < 2) { setError("At least 2 option texts are required"); return false; }
-      if (!currentQuestion.options.some(o => o.isCorrect && o.text.trim())) { setError("Mark a filled-in option as correct"); return false; }
+      if (!currentQuestion.options.some(o => o.isCorrect && o.text.trim())) { setError("Mark at least one filled-in option as correct"); return false; }
+      const texts = currentQuestion.options.filter(o => o.text.trim()).map(o => o.text.trim().toLowerCase());
+      if (new Set(texts).size !== texts.length) { setError("Option texts must be distinct"); return false; }
     }
     if (currentQuestion.type === "truefalse" && currentQuestion.correctAnswer === null) {
       setError("Select the correct answer (True or False)"); return false;
@@ -471,14 +468,14 @@ function QuizBuilder() {
               {currentQuestion.type === "mcq" && (
                 <div className="options-section">
                   <label>Answer Options *</label>
-                  <p className="options-hint">Click the circle to mark the correct answer</p>
+                  <p className="options-hint">Click the circle to mark correct answers — you can mark more than one, and the marks are split equally between them</p>
                   {currentQuestion.options.map((option, idx) => (
                     <div key={idx} className="option-input-row">
                       <button
                         className={`correct-toggle ${option.isCorrect ? "correct" : ""}`}
                         type="button"
-                        onClick={() => handleOptionChange(idx, "isCorrect", true)}
-                        title="Mark as correct"
+                        onClick={() => handleOptionChange(idx, "isCorrect", !option.isCorrect)}
+                        title={option.isCorrect ? "Unmark as correct" : "Mark as correct"}
                       >
                         {option.isCorrect ? <IconCheck /> : <span>{idx + 1}</span>}
                       </button>

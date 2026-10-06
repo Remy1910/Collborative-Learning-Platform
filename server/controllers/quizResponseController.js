@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const QuizResponse = require("../models/QuizResponse");
 const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
@@ -16,9 +17,13 @@ const isPastTimeLimit = (response, quiz) =>
 const percentageOf = (score, total) =>
   total > 0 ? Number(((score / total) * 100).toFixed(2)) : 0;
 
+// MCQ partial credit is fractional, so round to avoid floating-point noise in totals
+const sumMarks = (responses) =>
+  Number(responses.reduce((sum, r) => sum + (r.marksObtained || 0), 0).toFixed(2));
+
 // Totals up the attempt and closes it with the given status
 const finalizeResponse = (response, quiz, status) => {
-  const totalMarks = response.responses.reduce((sum, r) => sum + (r.marksObtained || 0), 0);
+  const totalMarks = sumMarks(response.responses);
   const elapsed = elapsedSeconds(response);
 
   response.totalMarksObtained = totalMarks;
@@ -28,15 +33,40 @@ const finalizeResponse = (response, quiz, status) => {
   response.isPassed = quiz ? totalMarks >= quiz.passMarks : false;
 };
 
-// Questions as a student may see them — no answer key
+const correctOptionCount = (q) => (q.options || []).filter(o => o.isCorrect).length;
+
+// Questions as a student may see them — no answer key, but whether to pick one option or several
 const toStudentQuestion = (q) => ({
   _id: q._id,
   type: q.type,
   questionText: q.questionText,
   marks: q.marks,
   options: (q.options || []).map(o => ({ text: o.text })),
+  multipleCorrect: q.type === "mcq" ? correctOptionCount(q) > 1 : undefined,
   order: q.order
 });
+
+// MCQ answers are stored as an array of selected option texts (older attempts stored a single string)
+const normalizeMcqAnswer = (studentAnswer, question) => {
+  const picked = Array.isArray(studentAnswer) ? studentAnswer : [studentAnswer];
+  const validTexts = new Set(question.options.map(o => o.text));
+  const selected = [...new Set(picked.filter(a => typeof a === "string" && validTexts.has(a)))];
+  return selected.length ? selected : null;
+};
+
+// Each correct option is worth an equal share of the marks; each wrong pick cancels one share, floored at 0
+const gradeMcq = (selected, question) => {
+  const correctTexts = new Set(question.options.filter(o => o.isCorrect).map(o => o.text));
+  const picked = selected || [];
+  const correctPicked = picked.filter(a => correctTexts.has(a)).length;
+  const wrongPicked = picked.length - correctPicked;
+  const share = question.marks / correctTexts.size;
+  const marksObtained = Math.max(0, Number(((correctPicked - wrongPicked) * share).toFixed(2)));
+  return {
+    isCorrect: correctPicked === correctTexts.size && wrongPicked === 0,
+    marksObtained
+  };
+};
 
 // An in-progress attempt without per-answer grading, so students can't probe correctness mid-quiz
 const toStudentInProgressResponse = (response) => {
@@ -145,13 +175,49 @@ const startQuiz = async (req, res) => {
   }
 };
 
+// Published quizzes can't be edited, so their duration and questions are cached for auto-save,
+// which is the most frequent request during a quiz
+const QUIZ_CACHE_TTL_MS = 5 * 60 * 1000;
+const quizCache = new Map(); // quizId -> { duration, questions: Map(questionId -> question), expiresAt }
+
+const getPublishedQuizForSaving = async (quizId) => {
+  const key = String(quizId);
+  const cached = quizCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+
+  const [quiz, questions] = await Promise.all([
+    Quiz.findById(quizId).select("duration isPublished").lean(),
+    Question.find({ quiz: quizId }).select("type marks options correctAnswer").lean()
+  ]);
+  if (!quiz) return null;
+
+  const entry = {
+    duration: quiz.duration,
+    questions: new Map(questions.map(q => [String(q._id), q])),
+    expiresAt: Date.now() + QUIZ_CACHE_TTL_MS
+  };
+  // Drafts can still change, so only published quizzes are cached
+  if (quiz.isPublished) {
+    for (const [id, value] of quizCache) if (value.expiresAt <= Date.now()) quizCache.delete(id);
+    quizCache.set(key, entry);
+  }
+  return entry;
+};
+
+const MAX_SHORT_ANSWER_LENGTH = 10000;
+
 // Student saves an answer (auto-save)
 const saveResponse = async (req, res) => {
   try {
     const { responseId } = req.params;
-    const { questionId, studentAnswer } = req.body;
+    const { questionId } = req.body;
+    let { studentAnswer } = req.body;
 
-    const response = await QuizResponse.findById(responseId).populate("quiz", "duration");
+    if (!mongoose.isValidObjectId(responseId) || !mongoose.isValidObjectId(questionId)) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const response = await QuizResponse.findById(responseId).select("quiz student status startedAt").lean();
     if (!response) {
       return res.status(404).json({ message: "Response not found" });
     }
@@ -164,22 +230,18 @@ const saveResponse = async (req, res) => {
       return res.status(400).json({ message: "Quiz already submitted" });
     }
 
-    if (isPastTimeLimit(response, response.quiz)) {
+    const quiz = await getPublishedQuizForSaving(response.quiz);
+    if (!quiz) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+
+    if (isPastTimeLimit(response, quiz)) {
       return res.status(400).json({ message: "The time limit for this quiz has expired" });
     }
 
-    const question = await Question.findOne({ _id: questionId, quiz: response.quiz._id });
+    const question = quiz.questions.get(questionId);
     if (!question) {
       return res.status(404).json({ message: "Question not found" });
-    }
-
-    // Find answer in responses array
-    const answerIndex = response.responses.findIndex(
-      r => r.question.toString() === questionId
-    );
-
-    if (answerIndex === -1) {
-      return res.status(404).json({ message: "Question not in this quiz" });
     }
 
     // Auto-grade MCQ and True/False
@@ -187,22 +249,31 @@ const saveResponse = async (req, res) => {
     let marksObtained = 0;
 
     if (question.type === "mcq") {
-      isCorrect = studentAnswer === question.options.find(o => o.isCorrect)?.text;
-      if (isCorrect) marksObtained = question.marks;
+      studentAnswer = normalizeMcqAnswer(studentAnswer, question);
+      ({ isCorrect, marksObtained } = gradeMcq(studentAnswer, question));
     } else if (question.type === "truefalse") {
       isCorrect = studentAnswer === question.correctAnswer;
       if (isCorrect) marksObtained = question.marks;
+    } else if (typeof studentAnswer !== "string" || studentAnswer.length > MAX_SHORT_ANSWER_LENGTH) {
+      // Short answer questions are not auto-graded
+      return res.status(400).json({ message: `Answer must be text of at most ${MAX_SHORT_ANSWER_LENGTH} characters` });
     }
-    // Short answer questions are not auto-graded
 
-    response.responses[answerIndex] = {
-      question: questionId,
-      studentAnswer,
-      isCorrect,
-      marksObtained
-    };
+    // Single atomic write; the status filter rejects saves that race with a submit
+    const result = await QuizResponse.updateOne(
+      { _id: responseId, status: "inprogress", "responses.question": questionId },
+      {
+        $set: {
+          "responses.$.studentAnswer": studentAnswer,
+          "responses.$.isCorrect": isCorrect,
+          "responses.$.marksObtained": marksObtained
+        }
+      }
+    );
 
-    await response.save();
+    if (result.matchedCount === 0) {
+      return res.status(400).json({ message: "Quiz already submitted or question not in this quiz" });
+    }
 
     // Don't echo grading back — the student would learn which answers are correct
     res.json({ message: "Answer saved" });
@@ -465,10 +536,7 @@ const gradeShortAnswer = async (req, res) => {
     answer.isGraded = true;
 
     // Recalculate total marks
-    response.totalMarksObtained = response.responses.reduce(
-      (sum, r) => sum + (r.marksObtained || 0),
-      0
-    );
+    response.totalMarksObtained = sumMarks(response.responses);
     response.isPassed = response.totalMarksObtained >= quiz.passMarks;
 
     // Mark the attempt graded once every short answer has been reviewed.

@@ -28,8 +28,10 @@ const validateQuestionData = ({ type, marks, options, correctAnswer }) => {
   if (type === "mcq") {
     if (!Array.isArray(options) || options.length < 2) return "MCQ must have at least 2 options";
     if (options.some(opt => typeof opt?.text !== "string" || !opt.text.trim())) return "MCQ options cannot be empty";
-    // Auto-grading compares against a single correct option
-    if (options.filter(opt => opt.isCorrect).length !== 1) return "MCQ must have exactly one correct option";
+    // Student answers are matched to options by text, so texts must be distinct
+    const texts = options.map(opt => opt.text.trim().toLowerCase());
+    if (new Set(texts).size !== texts.length) return "MCQ options must be distinct";
+    if (!options.some(opt => opt.isCorrect)) return "MCQ must have at least one correct option";
   }
 
   if (type === "truefalse" && typeof correctAnswer !== "boolean") {
@@ -181,6 +183,7 @@ const getQuizById = async (req, res) => {
     const visibleQuestions = req.user.role === "student"
       ? questions.map(question => {
         const visible = question.toObject();
+        if (visible.type === "mcq") visible.multipleCorrect = visible.options.filter(o => o.isCorrect).length > 1;
         if (visible.options) visible.options = visible.options.map(option => ({ text: option.text }));
         delete visible.correctAnswer;
         delete visible.modelAnswer;

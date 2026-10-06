@@ -51,6 +51,8 @@ function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("reason") === "session-invalidated") {
       setError("You were logged out because your account was signed in on another device.");
+    } else if (params.get("reason") === "session-expired") {
+      setError("Your session has expired. Please sign in again.");
     }
   }, []);
 

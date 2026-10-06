@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { quizAPI } from "../utils/api";
 import { useQuizProctoring } from "../hooks/useQuizProctoring";
@@ -124,12 +124,66 @@ function QuizTaker() {
     }
   }, [result, terminated, exitFullscreen]);
 
+  // ── Auto-save ────────────────────────────────────────────────────────────
+  // Saves for the same question run one after another so an older answer can't land last.
+  // Typed answers wait until the student pauses, instead of sending a request per keystroke.
+  const TEXT_SAVE_DELAY_MS = 800;
+  const responseIdRef = useRef(null);
+  const saveChains = useRef({});    // { [questionId]: Promise }
+  const pendingTextSaves = useRef({}); // { [questionId]: { timer, value } }
+
+  useEffect(() => { responseIdRef.current = responseId; }, [responseId]);
+
+  const queueSave = useCallback((questionId, value) => {
+    const previous = saveChains.current[questionId] || Promise.resolve();
+    const next = previous.then(async () => {
+      if (!responseIdRef.current) return;
+      try {
+        await quizAPI.saveResponse(responseIdRef.current, { questionId, studentAnswer: value });
+      } catch {
+        // silent — we still have local state
+      }
+    });
+    saveChains.current[questionId] = next;
+    return next;
+  }, []);
+
+  const flushPendingSaves = useCallback(() => {
+    Object.entries(pendingTextSaves.current).forEach(([questionId, { timer, value }]) => {
+      clearTimeout(timer);
+      queueSave(questionId, value);
+    });
+    pendingTextSaves.current = {};
+    return Promise.all(Object.values(saveChains.current));
+  }, [queueSave]);
+
+  // Don't drop a typed answer if the page unmounts mid-delay
+  useEffect(() => () => { flushPendingSaves(); }, [flushPendingSaves]);
+
+  const handleAnswerChange = (questionId, value, { debounce = false } = {}) => {
+    setAnswers(prev => ({ ...prev, [questionId]: value }));
+    clearTimeout(pendingTextSaves.current[questionId]?.timer);
+    delete pendingTextSaves.current[questionId];
+
+    if (!debounce) {
+      queueSave(questionId, value);
+      return;
+    }
+    const timer = setTimeout(() => {
+      delete pendingTextSaves.current[questionId];
+      queueSave(questionId, value);
+    }, TEXT_SAVE_DELAY_MS);
+    pendingTextSaves.current[questionId] = { timer, value };
+  };
+
   // ── Submit handler (memoised to be safe in timer callback) ───────────────
   const handleSubmitQuiz = useCallback(async () => {
     if (!responseId) return;
     setShowConfirm(false);
     setSubmitting(true);
     try {
+      // Make sure the last typed answers reach the server before grading
+      await flushPendingSaves();
       const resultData = await quizAPI.submitQuiz(responseId);
       setResult(resultData);
       setTimeLeft(0);
@@ -138,7 +192,7 @@ function QuizTaker() {
     } finally {
       setSubmitting(false);
     }
-  }, [responseId]);
+  }, [responseId, flushPendingSaves]);
 
   // ── Timer countdown ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -156,22 +210,6 @@ function QuizTaker() {
     return () => clearInterval(id);
   }, [timeLeft, result, handleSubmitQuiz]);
 
-  // ── Save answer to server ──────────────────────────────────────────────
-  const saveAnswer = async (questionId, value) => {
-    if (!responseId) return;
-    try {
-      await quizAPI.saveResponse(responseId, { questionId, studentAnswer: value });
-    } catch {
-      // silent — we still have local state
-    }
-  };
-
-  const handleAnswerChange = (questionId, value) => {
-    setAnswers(prev => ({ ...prev, [questionId]: value }));
-    // Debounce auto-save — save immediately for radio clicks, debounced for text
-    saveAnswer(questionId, value);
-  };
-
   const formatTime = (s) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -180,7 +218,7 @@ function QuizTaker() {
 
   const answeredCount = questions.filter(q => {
     const a = answers[q._id];
-    return a !== null && a !== undefined && a !== "";
+    return a !== null && a !== undefined && a !== "" && !(Array.isArray(a) && a.length === 0);
   }).length;
 
   // ── Pre-quiz proctoring gate ─────────────────────────────────────────────
@@ -404,7 +442,9 @@ function QuizTaker() {
                 {currentQ.questionText}
               </h2>
               <p className="question-marks" style={{ marginBottom: "1.5rem" }}>
-                Select the best answer below
+                {currentQ.type === "mcq" && currentQ.multipleCorrect
+                  ? "Select all correct answers — marks are split across them, and wrong picks cost marks"
+                  : "Select the best answer below"}
               </p>
 
               {/* ── MCQ ── */}
@@ -412,7 +452,15 @@ function QuizTaker() {
                 <div className="options-container">
                   {currentQ.options?.map((opt, idx) => {
                     const optVal = opt.text;
-                    const isSelected = currentAnswer === optVal;
+                    const multi = Boolean(currentQ.multipleCorrect);
+                    // Older attempts may have saved a single string
+                    const selectedList = Array.isArray(currentAnswer) ? currentAnswer : currentAnswer ? [currentAnswer] : [];
+                    const isSelected = selectedList.includes(optVal);
+                    const toggle = () => {
+                      if (!multi) return handleAnswerChange(currentQ._id, [optVal]);
+                      const next = isSelected ? selectedList.filter(v => v !== optVal) : [...selectedList, optVal];
+                      handleAnswerChange(currentQ._id, next);
+                    };
                     return (
                       <label
                         key={idx}
@@ -420,19 +468,22 @@ function QuizTaker() {
                         style={isSelected ? { borderColor: "#2563eb", background: "#dbeafe" } : {}}
                       >
                         <div style={{
-                          width: "22px", height: "22px", borderRadius: "50%",
-                          border: isSelected ? "6px solid #2563eb" : "2px solid #cbd5e1",
+                          width: "22px", height: "22px", borderRadius: multi ? "5px" : "50%",
+                          border: isSelected ? (multi ? "2px solid #2563eb" : "6px solid #2563eb") : "2px solid #cbd5e1",
                           flexShrink: 0, cursor: "pointer", transition: "all .15s",
                           background: isSelected ? "#2563eb" : "white",
-                          boxShadow: isSelected ? "0 0 0 3px rgba(37,99,235,.15)" : "none"
-                        }} />
+                          boxShadow: isSelected ? "0 0 0 3px rgba(37,99,235,.15)" : "none",
+                          color: "white", fontSize: "14px", lineHeight: "18px", textAlign: "center"
+                        }}>
+                          {multi && isSelected ? "✓" : null}
+                        </div>
                         <span style={{ fontWeight: isSelected ? "600" : "400" }}>{optVal}</span>
                         <input
-                          type="radio"
+                          type={multi ? "checkbox" : "radio"}
                           name={`q-${currentQ._id}`}
                           value={optVal}
                           checked={isSelected}
-                          onChange={() => handleAnswerChange(currentQ._id, optVal)}
+                          onChange={toggle}
                           style={{ display: "none" }}
                         />
                       </label>
@@ -467,7 +518,8 @@ function QuizTaker() {
                     className="answer-textarea"
                     placeholder="Type your answer here..."
                     value={currentAnswer || ""}
-                    onChange={e => handleAnswerChange(currentQ._id, e.target.value)}
+                    onChange={e => handleAnswerChange(currentQ._id, e.target.value, { debounce: true })}
+                    onBlur={flushPendingSaves}
                     rows="6"
                   />
                 </div>
@@ -510,7 +562,7 @@ function QuizTaker() {
           <div className="question-tracker">
             {questions.map((q, idx) => {
               const a = answers[q._id];
-              const isAnswered = a !== null && a !== undefined && a !== "";
+              const isAnswered = a !== null && a !== undefined && a !== "" && !(Array.isArray(a) && a.length === 0);
               const isCurrent = idx === currentIdx;
               return (
                 <button

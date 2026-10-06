@@ -100,20 +100,20 @@ function StudentDashboard() {
     }
     try {
       if (activeTab === "dashboard" || activeTab === "my-quizzes") {
-        const q = await quizAPI.getAssignedQuizzes().catch(() => []);
+        const q = await quizAPI.getAssignedQuizzes();
         setQuizzes(Array.isArray(q) ? q : []);
       }
       if (activeTab === "results") {
-        const r = await quizAPI.getMyResults().catch(() => []);
+        const r = await quizAPI.getMyResults();
         setResults(Array.isArray(r) ? r : []);
       }
       // The dashboard's "Enrolled Courses" card needs the course list too
       if (activeTab === "courses" || activeTab === "dashboard") {
-        const c = await courseAPI.getCourses().catch(() => []);
+        const c = await courseAPI.getCourses();
         setCourses(Array.isArray(c) ? c : []);
       }
       if (activeTab === "assignments") {
-        const a = await assignmentAPI.getAvailableAssignments().catch(() => []);
+        const a = await assignmentAPI.getAvailableAssignments();
         setAssignments(Array.isArray(a) ? a : []);
       }
     } catch (err) {
@@ -150,9 +150,8 @@ function StudentDashboard() {
     try {
       await courseAPI.enrollCourse(course._id);
       showMsg(`Enrolled in "${course.title}"! Its quizzes and assignments will now appear in your dashboard.`);
-      // Refresh courses
-      const c = await courseAPI.getCourses().catch(() => []);
-      setCourses(Array.isArray(c) ? c : []);
+      // Refresh courses (keeps the current list if the refresh itself fails)
+      await loadTabData({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {

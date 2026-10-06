@@ -126,24 +126,22 @@ function FacultyDashboard() {
   const showMsg = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(""), 3000); };
 
   const loadAll = async () => {
-    try {
-      setLoading(true);
-      const [qData, cData, sData, nData] = await Promise.all([
-        quizAPI.getMyQuizzes().catch(() => []),
-        courseAPI.getCourses().catch(() => []),
-        assignmentAPI.getStats().catch(() => ({ totalCourses: 0, totalAssignments: 0, totalSubmissions: 0, pendingGrading: 0 })),
-        noticeAPI.getMyNotices().catch(() => []),
-      ]);
-      setQuizzes(Array.isArray(qData) ? qData : []);
-      // The server only returns this faculty member's own courses
-      setCourses(Array.isArray(cData) ? cData : []);
-      setStats(sData || { totalCourses: 0, totalAssignments: 0, totalSubmissions: 0, pendingGrading: 0 });
-      setNotices(Array.isArray(nData) ? nData : []);
-    } catch (err) {
-      setError("Failed to load dashboard data");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    // Load each section independently; a failure keeps that section's previous data and is reported
+    const [qRes, cRes, sRes, nRes] = await Promise.allSettled([
+      quizAPI.getMyQuizzes(),
+      courseAPI.getCourses(),
+      assignmentAPI.getStats(),
+      noticeAPI.getMyNotices(),
+    ]);
+    if (qRes.status === "fulfilled") setQuizzes(Array.isArray(qRes.value) ? qRes.value : []);
+    // The server only returns this faculty member's own courses
+    if (cRes.status === "fulfilled") setCourses(Array.isArray(cRes.value) ? cRes.value : []);
+    if (sRes.status === "fulfilled" && sRes.value) setStats(sRes.value);
+    if (nRes.status === "fulfilled") setNotices(Array.isArray(nRes.value) ? nRes.value : []);
+    const failure = [qRes, cRes, sRes, nRes].find(r => r.status === "rejected");
+    if (failure) setError(`Couldn't load all dashboard data: ${failure.reason.message}`);
+    setLoading(false);
   };
 
   // ── Post Notice ────────────────────────────────────────────────────────
@@ -1345,15 +1343,16 @@ function FacultyDashboard() {
               {reviewResponse.responses.map((r, idx) => {
                 const q = r.question;
                 if (!q) return null;
-                const answered = r.studentAnswer !== null && r.studentAnswer !== undefined && r.studentAnswer !== "";
+                const answer = Array.isArray(r.studentAnswer) ? r.studentAnswer.join(", ") : r.studentAnswer;
+                const answered = answer !== null && answer !== undefined && answer !== "";
                 const correct = q.type === "mcq"
-                  ? q.options?.find(o => o.isCorrect)?.text
+                  ? q.options?.filter(o => o.isCorrect).map(o => o.text).join(", ")
                   : q.type === "truefalse" ? String(q.correctAnswer) : null;
                 return (
                   <div key={q._id} className="submission-item" style={{ flexDirection: "column", alignItems: "stretch" }}>
                     <div className="student-name">Q{idx + 1}. {q.questionText}</div>
                     <div className="submission-content">
-                      <strong>Answer:</strong> {answered ? String(r.studentAnswer) : <em>No answer</em>}
+                      <strong>Answer:</strong> {answered ? String(answer) : <em>No answer</em>}
                     </div>
                     {correct !== null && (
                       <div className="submission-content"><strong>Correct:</strong> {correct}</div>

@@ -2,7 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const mongoSanitize = require("express-mongo-sanitize");
 require("dotenv").config();
 
@@ -42,11 +42,23 @@ app.use(cors({
 app.use(express.json());
 app.get("/uploads/:storedName", getLegacySubmissionFile);
 
-// Rate limiting on auth routes only
+// Rate limiting on auth routes only.
+// A whole classroom usually shares one public IP (college Wi-Fi/NAT), so the per-IP limit is
+// generous and brute-force protection comes from a tighter limit per account.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 2000,
   message: { message: "Too many requests, please try again later" },
+});
+
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    return email ? `email:${email}` : `ip:${ipKeyGenerator(req.ip)}`;
+  },
+  message: { message: "Too many attempts for this account, please try again in 15 minutes" },
 });
 
 // MongoDB connection
@@ -55,6 +67,7 @@ mongoose.connect(process.env.MONGO_URI)
   .catch((err) => console.log("MongoDB connection error:", err));
 
 // Routes
+app.use(["/api/auth/login", "/api/auth/forgot-password"], accountLimiter);
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/assignments", assignmentRoutes);

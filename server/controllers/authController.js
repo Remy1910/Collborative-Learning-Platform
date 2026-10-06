@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { validateEmail, validatePassword, validateName } = require("../utils/validation");
 const crypto = require("crypto");
 const sendEmail = require("../utils/sendEmail");
+const { clearSessionCache } = require("../middleware/authMiddleware");
 
 // Emails are matched case-insensitively and ignore stray spaces from copy-paste
 const normalizeEmail = (email) => (typeof email === "string" ? email.trim().toLowerCase() : "");
@@ -85,6 +86,7 @@ const login = async (req, res) => {
     const sessionId = crypto.randomBytes(16).toString("hex");
     user.currentSessionId = sessionId;
     await user.save();
+    clearSessionCache(user._id);
 
     const token = jwt.sign(
       { id: user._id, role: user.role, sessionId },   // <-- sessionId added
@@ -213,6 +215,7 @@ const resetPassword = async (req, res) => {
     user.currentSessionId = null;   // <-- added: invalidate any active session
 
     await user.save();
+    clearSessionCache(user._id);
 
     res.json({ message: "Password reset successful" });
   } catch (error) {
@@ -225,6 +228,7 @@ const logout = async (req, res) => {
   try {
     // req.user is set by the protect middleware — it's the decoded JWT payload
     await User.findByIdAndUpdate(req.user.id, { currentSessionId: null });
+    clearSessionCache(req.user.id);
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -4,10 +4,10 @@ const API_BASE_URL = import.meta.env.VITE_API_URL
 
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
 export const getSubmissionFile = async (submissionId, fileId) => {
-  const response = await fetch(`${API_BASE_URL}/assignments/files/${submissionId}/${fileId}`, {
+  const response = await authFetch(`${API_BASE_URL}/assignments/files/${submissionId}/${fileId}`, {
     headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
   });
-  if (!response.ok) throw new Error("Unable to open attachment");
+  if (!response.ok) return handleResponse(response);
   return response.blob();
 };
 
@@ -35,33 +35,43 @@ export const getAuthHeader = () => {
   };
 };
 
+const SERVER_UNREACHABLE =
+  "Can't reach the server. Check your connection and try again — if the site has been idle it can take up to a minute to wake up.";
+
+// Clears the stored login and sends the user to sign in again. Returns a promise that
+// never settles so the caller doesn't go on to treat the failed request as empty data.
+const endSession = (reason) => {
+  ["token", "userId", "role", "userName"].forEach(key => localStorage.removeItem(key));
+  window.location.href = `/login?reason=${reason}`;
+  return new Promise(() => {});
+};
+
+// Common handling for authenticated requests: expired/invalid logins end the session,
+// other failures become an Error carrying the server's message
+const handleResponse = async (response) => {
+  if (response.ok) return response.json();
+
+  const error = await response.json().catch(() => ({}));
+  if (error.code === "SESSION_INVALIDATED") return endSession("session-invalidated");
+  if (response.status === 401) return endSession("session-expired");
+  throw new Error(error.message || error.error || `Request failed (${response.status})`);
+};
+
+const authFetch = async (url, options) => {
+  try {
+    return await fetch(url, options);
+  } catch {
+    throw new Error(SERVER_UNREACHABLE);
+  }
+};
+
 // Generic fetch helper
 export const apiCall = async (endpoint, options = {}) => {
-  const url = `${API_BASE_URL}${endpoint}`;
-  const headers = getAuthHeader();
-
-  const response = await fetch(url, {
-    headers,
+  const response = await authFetch(`${API_BASE_URL}${endpoint}`, {
+    headers: getAuthHeader(),
     ...options,
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: "Network error" }));
-
-    if (error.code === "SESSION_INVALIDATED") {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userId");
-      localStorage.removeItem("role");
-      localStorage.removeItem("userName");
-
-      window.location.href = "/login?reason=session-invalidated";
-      return; // stop here, don't let the caller try to use a rejected response
-    }
-
-    throw new Error(error.message || "API Error");
-  }
-
-  return response.json();
+  return handleResponse(response);
 };
 
 // ── Auth API ────────────────────────────────────────────────────────────────
@@ -157,14 +167,13 @@ export const assignmentAPI = {
 
   // Student: submit or resubmit — FormData with assignmentId, optional content (note) and "files"
   submitAssignment: async (data) => {
-    const response = await fetch(`${API_BASE_URL}/assignments/submit`, {
+    // Multipart body — the browser sets Content-Type (with the boundary) itself
+    const response = await authFetch(`${API_BASE_URL}/assignments/submit`, {
       method: "POST",
       headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       body: data,
     });
-    const json = await response.json().catch(() => ({ message: "Network error" }));
-    if (!response.ok) throw new Error(json.message || "Assignment submission failed");
-    return json;
+    return handleResponse(response);
   },
 
   // Student: view own submissions
