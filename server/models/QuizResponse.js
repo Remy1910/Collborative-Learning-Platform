@@ -68,6 +68,14 @@ const quizResponseSchema = new mongoose.Schema(
       }
     ],
 
+    // Photos of the student's rough work live in the RoughWorkPhoto collection
+    roughWorkCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    roughWorkSubmittedAt: Date,
+
     reattemptGranted: {
       grantedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       reason: String,

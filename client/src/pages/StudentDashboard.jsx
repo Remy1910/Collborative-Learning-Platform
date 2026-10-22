@@ -4,6 +4,7 @@ import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, openSubmissionFi
 import {
   ACCEPTED_FILE_TYPES, MAX_FILES, formatDateTime, formatFileSize, isPastDeadline, timeUntil, validateSubmissionFiles
 } from "../utils/assignments";
+import { RoughWorkUpload } from "../components/RoughWork";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -87,6 +88,8 @@ function StudentDashboard() {
   const [dragging, setDragging] = useState(false);
   // Id of the course currently being enrolled in (only that card shows a spinner)
   const [enrollingId, setEnrollingId] = useState(null);
+  // Submitted quiz whose rough work photos are being uploaded
+  const [roughWorkQuiz, setRoughWorkQuiz] = useState(null);
 
   useEffect(() => { loadTabData(); }, [activeTab]);
 
@@ -570,6 +573,16 @@ function StudentDashboard() {
                             {q.score != null && (
                               <span className="quiz-score">{q.score} / {q.totalMarks}</span>
                             )}
+                            {q.roughWorkDeadline ? (
+                              <button
+                                className={`btn-small ${q.roughWorkCount ? "btn-secondary" : "btn-primary"}`}
+                                onClick={() => setRoughWorkQuiz(q)}
+                              >
+                                📷 {q.roughWorkCount ? `Rough work (${q.roughWorkCount})` : "Upload rough work"}
+                              </button>
+                            ) : q.roughWorkCount > 0 && (
+                              <span className="text-muted small">📷 {q.roughWorkCount} photo{q.roughWorkCount !== 1 ? "s" : ""}</span>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -770,6 +783,22 @@ function StudentDashboard() {
         )}
 
       </div>
+
+      {/* ── Rough Work Upload Modal ── */}
+      {roughWorkQuiz && (
+        <Modal
+          title={`Rough work — ${roughWorkQuiz.title}`}
+          onClose={() => { setRoughWorkQuiz(null); loadTabData({ silent: true }); }}
+        >
+          <div className="modal-body">
+            <RoughWorkUpload
+              responseId={roughWorkQuiz.responseId}
+              deadline={roughWorkQuiz.roughWorkDeadline}
+              onDone={() => { setRoughWorkQuiz(null); loadTabData({ silent: true }); }}
+            />
+          </div>
+        </Modal>
+      )}
 
       {/* ── Submit Assignment Modal ── */}
       {showSubmitModal && selectedAssignment && (

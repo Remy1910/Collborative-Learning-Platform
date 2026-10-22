@@ -277,6 +277,39 @@ export const quizAPI = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  // Rough work photos
+  setRoughWorkRequirement: (quizId, requireRoughWork) =>
+    apiCall(`/quizzes/${quizId}/rough-work`, {
+      method: "PATCH",
+      body: JSON.stringify({ requireRoughWork }),
+    }),
+
+  // FormData with up to 5 images in the "photos" field
+  uploadRoughWork: async (responseId, formData) => {
+    // Multipart body — the browser sets Content-Type (with the boundary) itself
+    const response = await authFetch(`${API_BASE_URL}/quiz-responses/${responseId}/rough-work`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      body: formData,
+    });
+    return handleResponse(response);
+  },
+
+  getRoughWork: (responseId) =>
+    apiCall(`/quiz-responses/${responseId}/rough-work`),
+
+  deleteRoughWorkPhoto: (responseId, photoId) =>
+    apiCall(`/quiz-responses/${responseId}/rough-work/${photoId}`, { method: "DELETE" }),
+
+  // Photos need the auth header, so they're downloaded as blobs rather than linked directly
+  getRoughWorkPhoto: async (responseId, photoId) => {
+    const response = await authFetch(`${API_BASE_URL}/quiz-responses/${responseId}/rough-work/${photoId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+    });
+    if (!response.ok) return handleResponse(response);
+    return response.blob();
+  },
 };
 
 // ── Notice API ───────────────────────────────────────────────────────────────

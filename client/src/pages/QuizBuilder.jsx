@@ -53,6 +53,7 @@ function QuizBuilder() {
     dueDate: "",
     passMarks: 40,
     courseId: "",
+    requireRoughWork: true,
   });
 
   // Step 2: Questions
@@ -101,6 +102,7 @@ function QuizBuilder() {
         duration: quizDetails.duration ? parseInt(quizDetails.duration) : null,
         dueDate: quizDetails.dueDate || null,
         passMarks: Math.max(0, parseInt(quizDetails.passMarks) || 0),
+        requireRoughWork: quizDetails.requireRoughWork,
       };
       if (quizDetails.courseId) payload.courseId = quizDetails.courseId;
 
@@ -346,6 +348,22 @@ function QuizBuilder() {
                 />
                 <small className="text-muted">Total marks are the sum of the question marks you add next.</small>
               </div>
+
+              <div className="form-group">
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={quizDetails.requireRoughWork}
+                    onChange={e => handleDetailChange("requireRoughWork", e.target.checked)}
+                    style={{ width: "auto" }}
+                  />
+                  Require photos of rough work after submission
+                </label>
+                <small className="text-muted">
+                  Students must upload photos of their working on paper within 30 minutes of submitting.
+                  You can turn this off later from the quiz's Submissions view.
+                </small>
+              </div>
             </div>
 
             <div className="form-actions builder-actions">
@@ -568,7 +586,7 @@ function QuizBuilder() {
               </div>
             </div>
             <div className="success-actions">
-              <button className="btn-secondary" onClick={() => { setStep(1); setQuizDetails({ title:"",subject:"",description:"",duration:"",dueDate:"",passMarks:40,courseId:"" }); setQuestions([]); setQuizId(null); }}>
+              <button className="btn-secondary" onClick={() => { setStep(1); setQuizDetails({ title:"",subject:"",description:"",duration:"",dueDate:"",passMarks:40,courseId:"",requireRoughWork:true }); setQuestions([]); setQuizId(null); }}>
                 Create Another Quiz
               </button>
               <button className="btn-primary" onClick={() => navigate("/faculty/dashboard")}>

@@ -4,6 +4,7 @@ import { quizAPI, courseAPI, assignmentAPI, authAPI, noticeAPI, openSubmissionFi
 import {
   formatDateTime, formatFileSize, isPastDeadline, timeUntil, toDateTimeLocal, SUBMISSION_STATUS
 } from "../utils/assignments";
+import { RoughWorkGallery } from "../components/RoughWork";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -362,6 +363,22 @@ function FacultyDashboard() {
       setError(err.message);
     } finally {
       setQuizSubmissionsLoading(false);
+    }
+  };
+
+  // ── Rough work requirement (can be changed after publishing) ──────────
+  const [savingRoughWork, setSavingRoughWork] = useState(false);
+  const handleToggleRoughWork = async (quiz, requireRoughWork) => {
+    setSavingRoughWork(true);
+    try {
+      const result = await quizAPI.setRoughWorkRequirement(quiz._id, requireRoughWork);
+      setSelectedQuiz(prev => (prev?._id === quiz._id ? { ...prev, requireRoughWork } : prev));
+      setQuizzes(prev => prev.map(q => (q._id === quiz._id ? { ...q, requireRoughWork } : q)));
+      showMsg(result.message);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingRoughWork(false);
     }
   };
 
@@ -1254,6 +1271,22 @@ function FacultyDashboard() {
           onClose={() => setShowQuizSubmissionsModal(false)}
         >
           <div className="modal-body">
+            <label
+              className="small"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", cursor: "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(selectedQuiz.requireRoughWork)}
+                disabled={savingRoughWork}
+                onChange={e => handleToggleRoughWork(selectedQuiz, e.target.checked)}
+                style={{ width: "auto" }}
+              />
+              <span>
+                <strong>Require rough work photos</strong> — students upload photos of their paper working
+                within 30 minutes of submitting
+              </span>
+            </label>
             {!quizSubmissionsLoading && quizStats && (
               <div className="results-summary" style={{ marginBottom: "1rem" }}>
                 <div className="summary-stat">
@@ -1301,6 +1334,11 @@ function FacultyDashboard() {
                       <span className="marks-badge">
                         {sub.totalMarksObtained}/{selectedQuiz.totalMarks} {sub.isPassed ? "✓" : "✗"}
                       </span>
+                      {sub.roughWorkCount > 0 ? (
+                        <span className="badge badge-active" title="Rough work photos uploaded">📷 {sub.roughWorkCount}</span>
+                      ) : selectedQuiz.requireRoughWork && (
+                        <span className="badge badge-warning" title="No rough work photos uploaded">📷 none</span>
+                      )}
                       <button
                         className="btn-small btn-primary"
                         onClick={() => handleOpenReview(sub._id)}
@@ -1339,6 +1377,17 @@ function FacultyDashboard() {
               {" "}({reviewResponse.isPassed ? "passed" : "not passed"}, pass mark {reviewResponse.quiz?.passMarks})<br />
               <strong>Status:</strong> {reviewResponse.status === "terminated" ? "Auto-submitted (proctoring violations)" : reviewResponse.status}
             </div>
+            {(reviewResponse.quiz?.requireRoughWork || reviewResponse.roughWorkCount > 0) && (
+              <div style={{ margin: "1rem 0" }}>
+                <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                  📷 Rough work {reviewResponse.roughWorkCount > 0 && `(${reviewResponse.roughWorkCount} photo${reviewResponse.roughWorkCount !== 1 ? "s" : ""}, click to enlarge)`}
+                </div>
+                <RoughWorkGallery
+                  responseId={reviewResponse._id}
+                  emptyText="The student hasn't uploaded any rough work."
+                />
+              </div>
+            )}
             <div className="submissions-list">
               {reviewResponse.responses.map((r, idx) => {
                 const q = r.question;

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { quizAPI } from "../utils/api";
 import { useQuizProctoring } from "../hooks/useQuizProctoring";
+import { RoughWorkUpload } from "../components/RoughWork";
 import "../styles/dashboard.css";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -36,6 +37,8 @@ function QuizTaker() {
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [result, setResult] = useState(null);
+  // Quizzes that require rough work show the upload step before the score
+  const [roughWorkDone, setRoughWorkDone] = useState(false);
   const [error, setError] = useState("");
   const [savingIdx, setSavingIdx] = useState(null); // question idx being auto-saved
 
@@ -280,6 +283,25 @@ function QuizTaker() {
   }
 
   // ── Result Screen ─────────────────────────────────────────────────────────
+  if (result && result.requireRoughWork && result.roughWorkDeadline && !roughWorkDone) {
+    return (
+      <div className="quiz-taker">
+        <div className="quiz-header">
+          <h1>{quiz?.title}</h1>
+        </div>
+        <div style={{ padding: "2rem", maxWidth: "720px", margin: "0 auto" }}>
+          <div className="result-screen">
+            <RoughWorkUpload
+              responseId={result.responseId}
+              deadline={result.roughWorkDeadline}
+              onDone={() => setRoughWorkDone(true)}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (result) {
     const passed = result.isPassed;
     return (

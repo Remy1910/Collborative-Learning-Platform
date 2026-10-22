@@ -15,7 +15,8 @@ const {
   getStudentQuizzes,
   addQuestion,
   updateQuestion,
-  deleteQuestion
+  deleteQuestion,
+  setRoughWorkRequirement
 } = require("../controllers/quizController");
 
 // ── Faculty Routes (Create, Edit, Manage Quizzes) ──
@@ -31,6 +32,9 @@ router.patch("/:quizId", protect, authorizeRoles("faculty"), updateQuiz);
 
 // Publish quiz
 router.post("/:quizId/publish", protect, authorizeRoles("faculty"), publishQuiz);
+
+// Turn the rough-work photo requirement on/off (works on published quizzes too)
+router.patch("/:quizId/rough-work", protect, authorizeRoles("faculty"), setRoughWorkRequirement);
 
 // Delete quiz (soft delete)
 router.delete("/:quizId", protect, authorizeRoles("faculty"), deleteQuiz);

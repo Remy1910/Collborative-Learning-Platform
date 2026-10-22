@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 const QuizResponse = require("../models/QuizResponse");
 const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
+const RoughWorkPhoto = require("../models/RoughWorkPhoto");
+const { detectImageType, MAX_ROUGH_WORK_PHOTOS } = require("../middleware/roughWorkUpload");
+const { ROUGH_WORK_WINDOW_MINUTES, roughWorkDeadline } = require("../utils/roughWork");
 
 const MAX_VIOLATIONS = 3;
 // Allowance for network latency between the client timer hitting zero and its auto-submit/save arriving
@@ -371,7 +374,10 @@ const submitQuiz = async (req, res) => {
       totalMarks: quiz.totalMarks,
       percentage: percentageOf(response.totalMarksObtained, quiz.totalMarks),
       isPassed: response.isPassed,
-      hasShortAnswers
+      hasShortAnswers,
+      responseId: response._id,
+      requireRoughWork: Boolean(quiz.requireRoughWork),
+      roughWorkDeadline: quiz.requireRoughWork ? roughWorkDeadline(response) : null
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -394,7 +400,7 @@ const getSubmittedQuizzes = async (req, res) => {
       isActive: true
     })
       .populate("student", "name email")
-      .select("student totalMarksObtained status submittedAt isPassed")
+      .select("student totalMarksObtained status submittedAt isPassed roughWorkCount")
       .sort({ submittedAt: -1 });
 
     const totalStudents = quiz.assignedTo.length;
@@ -409,6 +415,7 @@ const getSubmittedQuizzes = async (req, res) => {
       pending: totalStudents - submitted,
       avgScore,
       totalMarks: quiz.totalMarks,
+      requireRoughWork: Boolean(quiz.requireRoughWork),
       submissions
     });
   } catch (error) {
@@ -420,7 +427,7 @@ const getSubmittedQuizzes = async (req, res) => {
 const getResponseDetails = async (req, res) => {
   try {
     const response = await QuizResponse.findById(req.params.responseId)
-      .populate("quiz", "title createdBy totalMarks passMarks")
+      .populate("quiz", "title createdBy totalMarks passMarks requireRoughWork")
       .populate("student", "name email")
       .populate("responses.question", "type questionText marks options correctAnswer modelAnswer");
 
@@ -696,6 +703,150 @@ const grantReattempt = async (req, res) => {
   }
 };
 
+// ── Rough work photos ──────────────────────────────────────────────────────
+
+// Loads an attempt and works out whether the requester is its student or the quiz's faculty
+const loadAttemptForRoughWork = async (responseId, userId) => {
+  if (!mongoose.isValidObjectId(responseId)) return { error: [400, "Invalid response ID"] };
+  const response = await QuizResponse.findById(responseId)
+    .select("quiz student status submittedAt isActive roughWorkCount roughWorkSubmittedAt")
+    .populate("quiz", "createdBy requireRoughWork");
+  if (!response) return { error: [404, "Response not found"] };
+  const isStudent = response.student.toString() === userId;
+  const isFaculty = response.quiz?.createdBy?.toString() === userId;
+  return { response, isStudent, isFaculty };
+};
+
+// Student uploads photos of their rough work after submitting
+const uploadRoughWork = async (req, res) => {
+  try {
+    const { response, isStudent, error } = await loadAttemptForRoughWork(req.params.responseId, req.user.id);
+    if (error) return res.status(error[0]).json({ message: error[1] });
+    if (!isStudent) return res.status(403).json({ message: "Not authorized" });
+
+    if (!response.quiz?.requireRoughWork) {
+      return res.status(400).json({ message: "This quiz doesn't ask for rough work photos" });
+    }
+    if (!response.isActive || !FINISHED_STATUSES.includes(response.status)) {
+      return res.status(400).json({ message: "Submit the quiz before uploading rough work" });
+    }
+    if (!roughWorkDeadline(response)) {
+      return res.status(400).json({
+        message: `Rough work had to be uploaded within ${ROUGH_WORK_WINDOW_MINUTES} minutes of submitting`
+      });
+    }
+
+    const files = req.files || [];
+    if (files.length === 0) {
+      return res.status(400).json({ message: "Choose at least one photo" });
+    }
+    if (response.roughWorkCount + files.length > MAX_ROUGH_WORK_PHOTOS) {
+      return res.status(400).json({
+        message: `You can upload at most ${MAX_ROUGH_WORK_PHOTOS} photos (${response.roughWorkCount} already uploaded)`
+      });
+    }
+
+    const photos = [];
+    for (const file of files) {
+      const contentType = detectImageType(file.buffer);
+      if (!contentType) {
+        return res.status(400).json({ message: `"${file.originalname}" is not a valid JPG, PNG or WebP image` });
+      }
+      photos.push({
+        response: response._id,
+        quiz: response.quiz._id,
+        student: response.student,
+        contentType,
+        size: file.size,
+        data: file.buffer
+      });
+    }
+
+    await RoughWorkPhoto.insertMany(photos);
+    const roughWorkCount = await RoughWorkPhoto.countDocuments({ response: response._id });
+    await QuizResponse.updateOne(
+      { _id: response._id },
+      { $set: { roughWorkCount, roughWorkSubmittedAt: new Date() } }
+    );
+
+    res.status(201).json({ message: "Rough work uploaded", roughWorkCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Student or faculty lists the photos for an attempt (metadata only)
+const listRoughWork = async (req, res) => {
+  try {
+    const { response, isStudent, isFaculty, error } = await loadAttemptForRoughWork(req.params.responseId, req.user.id);
+    if (error) return res.status(error[0]).json({ message: error[1] });
+    if (!isStudent && !isFaculty) return res.status(403).json({ message: "Not authorized" });
+
+    const photos = await RoughWorkPhoto.find({ response: response._id })
+      .select("contentType size createdAt")
+      .sort({ createdAt: 1 });
+
+    res.json({
+      requireRoughWork: Boolean(response.quiz?.requireRoughWork),
+      deadline: roughWorkDeadline(response),
+      submittedAt: response.roughWorkSubmittedAt || null,
+      photos
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Student or faculty views one photo
+const getRoughWorkPhoto = async (req, res) => {
+  try {
+    const { response, isStudent, isFaculty, error } = await loadAttemptForRoughWork(req.params.responseId, req.user.id);
+    if (error) return res.status(error[0]).json({ message: error[1] });
+    if (!isStudent && !isFaculty) return res.status(403).json({ message: "Not authorized" });
+
+    if (!mongoose.isValidObjectId(req.params.photoId)) {
+      return res.status(400).json({ message: "Invalid photo ID" });
+    }
+    const photo = await RoughWorkPhoto.findOne({ _id: req.params.photoId, response: response._id }).select("+data");
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+
+    res.set({
+      "Content-Type": photo.contentType,
+      "Content-Length": photo.data.length,
+      "Cache-Control": "private, max-age=3600",
+      "X-Content-Type-Options": "nosniff"
+    });
+    res.send(photo.data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Student removes a wrong photo while the upload window is still open
+const deleteRoughWorkPhoto = async (req, res) => {
+  try {
+    const { response, isStudent, error } = await loadAttemptForRoughWork(req.params.responseId, req.user.id);
+    if (error) return res.status(error[0]).json({ message: error[1] });
+    if (!isStudent) return res.status(403).json({ message: "Not authorized" });
+    if (!response.isActive || !roughWorkDeadline(response)) {
+      return res.status(400).json({ message: "Rough work can no longer be changed" });
+    }
+
+    if (!mongoose.isValidObjectId(req.params.photoId)) {
+      return res.status(400).json({ message: "Invalid photo ID" });
+    }
+    const deleted = await RoughWorkPhoto.deleteOne({ _id: req.params.photoId, response: response._id });
+    if (deleted.deletedCount === 0) return res.status(404).json({ message: "Photo not found" });
+
+    const roughWorkCount = await RoughWorkPhoto.countDocuments({ response: response._id });
+    await QuizResponse.updateOne({ _id: response._id }, { $set: { roughWorkCount } });
+
+    res.json({ message: "Photo removed", roughWorkCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   startQuiz,
   saveResponse,
@@ -707,5 +858,9 @@ module.exports = {
   getQuizStats,
   getMyResults,
   logViolation,
-  grantReattempt
+  grantReattempt,
+  uploadRoughWork,
+  listRoughWork,
+  getRoughWorkPhoto,
+  deleteRoughWorkPhoto
 };

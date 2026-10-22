@@ -67,6 +67,11 @@ const quizSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    // Students must photograph their rough work right after submitting
+    requireRoughWork: {
+      type: Boolean,
+      default: false
+    },
     isDeleted: {
       type: Boolean,
       default: false

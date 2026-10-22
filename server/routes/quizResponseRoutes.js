@@ -3,6 +3,7 @@ const router = express.Router();
 
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
+const { uploadRoughWorkPhotos } = require("../middleware/roughWorkUpload");
 
 const {
   startQuiz,
@@ -15,7 +16,11 @@ const {
   getQuizStats,
   getMyResults,
   logViolation,
-  grantReattempt
+  grantReattempt,
+  uploadRoughWork,
+  listRoughWork,
+  getRoughWorkPhoto,
+  deleteRoughWorkPhoto
 } = require("../controllers/quizResponseController");
 
 // ── Student Routes (Taking Quiz) ──
@@ -34,6 +39,12 @@ router.post("/:responseId/grant-reattempt", protect, authorizeRoles("faculty"), 
 
 // Submit quiz
 router.post("/:responseId/submit", protect, authorizeRoles("student"), submitQuiz);
+
+// Rough work photos: student uploads/removes after submitting; student or faculty views
+router.post("/:responseId/rough-work", protect, authorizeRoles("student"), uploadRoughWorkPhotos, uploadRoughWork);
+router.get("/:responseId/rough-work", protect, listRoughWork);
+router.get("/:responseId/rough-work/:photoId", protect, getRoughWorkPhoto);
+router.delete("/:responseId/rough-work/:photoId", protect, authorizeRoles("student"), deleteRoughWorkPhoto);
 
 // Get their quiz response with answers shown (if allowed)
 router.get("/:quizId/my-response", protect, authorizeRoles("student"), getStudentResponses);

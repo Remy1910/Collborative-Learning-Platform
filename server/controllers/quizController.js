@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Quiz = require("../models/Quiz");
 const Question = require("../models/Question");
 const QuizResponse = require("../models/QuizResponse");
+const { roughWorkDeadline } = require("../utils/roughWork");
 const Course = require("../models/Course");
 
 const QUESTION_TYPES = ["mcq", "truefalse", "shortanswer"];
@@ -44,7 +45,7 @@ const validateQuestionData = ({ type, marks, options, correctAnswer }) => {
 // Faculty creates a new quiz
 const createQuiz = async (req, res) => {
   try {
-    const { title, subject, description, duration, dueDate, passMarks, courseId } = req.body;
+    const { title, subject, description, duration, dueDate, passMarks, courseId, requireRoughWork } = req.body;
 
     if (!title || !subject) {
       return res.status(400).json({ message: "Title and subject are required" });
@@ -77,6 +78,7 @@ const createQuiz = async (req, res) => {
       dueDate,
       totalMarks: 0,
       passMarks: passMarks ?? 40,
+      requireRoughWork: Boolean(requireRoughWork),
       course: courseId || undefined,
       createdBy: req.user.id,
       status: "draft"
@@ -138,7 +140,7 @@ const getQuizzes = async (req, res) => {
     if (subject) filter.subject = subject;
 
     const quizzes = await Quiz.find(filter)
-      .select("title subject description status totalQuestions totalMarks dueDate createdAt isPublished")
+      .select("title subject description status totalQuestions totalMarks dueDate createdAt isPublished requireRoughWork")
       .sort({ createdAt: -1 });
 
     res.json(quizzes);
@@ -312,7 +314,7 @@ const getStudentQuizzes = async (req, res) => {
       isPublished: true,
       isDeleted: false
     })
-      .select("title subject status totalQuestions totalMarks duration dueDate createdAt")
+      .select("title subject status totalQuestions totalMarks duration dueDate createdAt requireRoughWork")
       .populate("createdBy", "name")
       .sort({ dueDate: 1 });
 
@@ -321,7 +323,7 @@ const getStudentQuizzes = async (req, res) => {
       quiz: { $in: quizzes.map(quiz => quiz._id) },
       student: req.user.id,
       isActive: true
-    }).select("quiz status totalMarksObtained");
+    }).select("quiz status totalMarksObtained submittedAt roughWorkCount");
     const responseByQuiz = new Map(responses.map(response => [response.quiz.toString(), response]));
 
     const quizzesWithStatus = quizzes.map(quiz => {
@@ -330,11 +332,46 @@ const getStudentQuizzes = async (req, res) => {
       return {
         ...quiz.toObject(),
         submissionStatus: response ? response.status : "notStarted",
-        score: isFinished ? response.totalMarksObtained : null
+        score: isFinished ? response.totalMarksObtained : null,
+        responseId: response ? response._id : null,
+        roughWorkCount: response ? response.roughWorkCount : 0,
+        // Set only while the student can still upload rough work photos
+        roughWorkDeadline: isFinished && quiz.requireRoughWork ? roughWorkDeadline(response) : null
       };
     });
 
     res.json(quizzesWithStatus);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Faculty turns the rough-work photo requirement on or off. Allowed even after publishing,
+// since it doesn't change the questions or grading
+const setRoughWorkRequirement = async (req, res) => {
+  try {
+    const { quizId } = req.params;
+    const { requireRoughWork } = req.body;
+
+    if (typeof requireRoughWork !== "boolean") {
+      return res.status(400).json({ message: "requireRoughWork must be true or false" });
+    }
+
+    const quiz = await Quiz.findOne({ _id: quizId, isDeleted: false });
+    if (!quiz) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+    if (quiz.createdBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    quiz.requireRoughWork = requireRoughWork;
+    await quiz.save();
+
+    res.json({
+      message: requireRoughWork ? "Rough work photos are now required" : "Rough work photos are no longer required",
+      requireRoughWork
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -481,5 +518,6 @@ module.exports = {
   getStudentQuizzes,
   addQuestion,
   updateQuestion,
-  deleteQuestion
+  deleteQuestion,
+  setRoughWorkRequirement
 };
