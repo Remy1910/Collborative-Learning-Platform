@@ -22,6 +22,7 @@ const {
   getRoughWorkPhoto,
   deleteRoughWorkPhoto
 } = require("../controllers/quizResponseController");
+const { generateAiFeedback } = require("../controllers/aiFeedbackController");
 
 // ── Student Routes (Taking Quiz) ──
 
@@ -39,6 +40,9 @@ router.post("/:responseId/grant-reattempt", protect, authorizeRoles("faculty"), 
 
 // Submit quiz
 router.post("/:responseId/submit", protect, authorizeRoles("student"), submitQuiz);
+
+// Student asks for AI study feedback on a finished attempt (generated once, then cached)
+router.post("/:responseId/ai-feedback", protect, authorizeRoles("student"), generateAiFeedback);
 
 // Rough work photos: student uploads/removes after submitting; student or faculty views
 router.post("/:responseId/rough-work", protect, authorizeRoles("student"), uploadRoughWorkPhotos, uploadRoughWork);

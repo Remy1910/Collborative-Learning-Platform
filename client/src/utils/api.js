@@ -266,6 +266,10 @@ export const quizAPI = {
 
   getMyResults: () => apiCall("/quiz-responses/student/my-results"),
 
+  // AI study feedback for a finished attempt (generated once, then cached server-side)
+  getAiFeedback: (responseId) =>
+    apiCall(`/quiz-responses/${responseId}/ai-feedback`, { method: "POST" }),
+
   logViolation: (responseId, data) =>
     apiCall(`/quiz-responses/${responseId}/violation`, {
       method: "POST",

@@ -70,6 +70,7 @@ function QuizBuilder() {
     ],
     correctAnswer: null,
     modelAnswer: "",
+    topic: "",
   };
   const [currentQuestion, setCurrentQuestion] = useState(defaultQuestion);
   const [editingIdx, setEditingIdx] = useState(null); // index of question being edited in list
@@ -178,6 +179,7 @@ function QuizBuilder() {
         options:       currentQuestion.type === "mcq"         ? currentQuestion.options.filter(o => o.text.trim()) : undefined,
         correctAnswer: currentQuestion.type === "truefalse"   ? currentQuestion.correctAnswer : undefined,
         modelAnswer:   currentQuestion.type === "shortanswer" ? currentQuestion.modelAnswer : undefined,
+        topic: currentQuestion.topic.trim() || undefined,
       });
 
       setQuestions(prev => [...prev, data.question]);
@@ -402,6 +404,7 @@ function QuizBuilder() {
                         <span className="q-number">Q{idx + 1}</span>
                         <span className="q-type-tag">{QTYPES.find(t => t.value === q.type)?.icon} {q.type.toUpperCase()}</span>
                         <span className="q-marks">{q.marks}M</span>
+                        {q.topic && <span className="q-type-tag">{q.topic}</span>}
                         <button
                           className="q-delete"
                           onClick={() => handleDeleteQuestion(q._id)}
@@ -467,6 +470,17 @@ function QuizBuilder() {
                   value={currentQuestion.questionText}
                   onChange={e => handleQuestionChange("questionText", e.target.value)}
                   rows="3"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Topic <span className="text-muted small">(optional, used for AI feedback)</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Recursion"
+                  maxLength={100}
+                  value={currentQuestion.topic}
+                  onChange={e => handleQuestionChange("topic", e.target.value)}
                 />
               </div>
 

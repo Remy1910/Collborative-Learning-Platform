@@ -76,6 +76,16 @@ const quizResponseSchema = new mongoose.Schema(
     },
     roughWorkSubmittedAt: Date,
 
+    // LLM-written study feedback, generated once per attempt on the student's request
+    aiFeedback: {
+      text: String,
+      model: String,
+      generatedAt: Date,
+      latencyMs: Number,
+      inputTokens: Number,
+      outputTokens: Number
+    },
+
     reattemptGranted: {
       grantedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       reason: String,

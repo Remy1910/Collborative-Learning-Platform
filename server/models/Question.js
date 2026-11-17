@@ -32,6 +32,12 @@ const questionSchema = new mongoose.Schema(
     correctAnswer: Boolean,
     // For Short Answer — faculty's grading reference, never sent to students
     modelAnswer: String,
+    // What the question tests (e.g. "Recursion"); AI feedback groups results by topic
+    topic: {
+      type: String,
+      trim: true,
+      maxlength: 100
+    },
     order: {
       type: Number,
       required: true

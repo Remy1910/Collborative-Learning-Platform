@@ -19,8 +19,15 @@ const syncQuizTotals = async (quiz) => {
 };
 
 // Returns an error message, or null if the question data is valid for its type
-const validateQuestionData = ({ type, marks, options, correctAnswer }) => {
+const MAX_TOPIC_LENGTH = 100;
+
+const validateQuestionData = ({ type, marks, options, correctAnswer, topic }) => {
   if (!QUESTION_TYPES.includes(type)) return "Invalid question type";
+
+  if (topic !== undefined && topic !== null &&
+    (typeof topic !== "string" || topic.trim().length > MAX_TOPIC_LENGTH)) {
+    return `Topic must be text of at most ${MAX_TOPIC_LENGTH} characters`;
+  }
 
   if (marks !== undefined && (typeof marks !== "number" || !Number.isFinite(marks) || marks < 1)) {
     return "Marks must be a number of at least 1";
@@ -381,13 +388,13 @@ const setRoughWorkRequirement = async (req, res) => {
 const addQuestion = async (req, res) => {
   try {
     const { quizId } = req.params;
-    const { type, questionText, marks, options, correctAnswer, modelAnswer } = req.body;
+    const { type, questionText, marks, options, correctAnswer, modelAnswer, topic } = req.body;
 
     if (!type || !questionText) {
       return res.status(400).json({ message: "Type and question text required" });
     }
 
-    const validationError = validateQuestionData({ type, marks, options, correctAnswer });
+    const validationError = validateQuestionData({ type, marks, options, correctAnswer, topic });
     if (validationError) {
       return res.status(400).json({ message: validationError });
     }
@@ -415,6 +422,7 @@ const addQuestion = async (req, res) => {
       options: type === "mcq" ? options.map(opt => ({ text: opt.text.trim(), isCorrect: Boolean(opt.isCorrect) })) : undefined,
       correctAnswer: type === "truefalse" ? correctAnswer : undefined,
       modelAnswer: type === "shortanswer" ? modelAnswer : undefined,
+      topic: typeof topic === "string" && topic.trim() ? topic.trim() : undefined,
       order
     });
 
@@ -433,7 +441,7 @@ const addQuestion = async (req, res) => {
 const updateQuestion = async (req, res) => {
   try {
     const { quizId, questionId } = req.params;
-    const { type, questionText, marks, options, correctAnswer, modelAnswer } = req.body;
+    const { type, questionText, marks, options, correctAnswer, modelAnswer, topic } = req.body;
 
     const quiz = await Quiz.findById(quizId);
     if (!quiz || quiz.createdBy.toString() !== req.user.id) {
@@ -456,7 +464,8 @@ const updateQuestion = async (req, res) => {
       marks: marks ?? existing.marks,
       options: options ?? existing.options,
       correctAnswer: correctAnswer ?? existing.correctAnswer,
-      modelAnswer: modelAnswer ?? existing.modelAnswer
+      modelAnswer: modelAnswer ?? existing.modelAnswer,
+      topic: typeof topic === "string" ? topic.trim() || undefined : existing.topic
     };
 
     const validationError = validateQuestionData(merged);
