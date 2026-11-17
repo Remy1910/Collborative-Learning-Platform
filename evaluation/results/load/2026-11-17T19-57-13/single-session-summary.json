@@ -1,0 +1,13 @@
+{
+  "accounts": 20,
+  "seqFirstRejected": 20,
+  "seqRequestsMin": 1,
+  "seqRequestsMax": 1,
+  "seqSecondValid": 20,
+  "seqStillRejected": 20,
+  "simExactlyOne": 20,
+  "simBoth": 0,
+  "simNone": 0,
+  "simLoginFailures": 0,
+  "simSurvivorLater": 19
+}

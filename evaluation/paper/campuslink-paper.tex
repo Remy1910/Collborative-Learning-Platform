@@ -1,0 +1,490 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{placeins}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{tikz}
+
+\usepackage[caption=false,font=footnotesize]{subfig}
+\setlength{\textfloatsep}{8pt plus 1pt minus 2pt}
+\setlength{\floatsep}{6pt plus 1pt minus 2pt}
+\setlength{\intextsep}{8pt plus 1pt minus 2pt}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% Red placeholder for numbers that MUST come from real experiments.
+% Search for \tbd before submission; none may remain.
+\newcommand{\tbd}[1]{\textcolor{red}{\textbf{[#1]}}}
+
+\begin{document}
+
+\title{CampusLink: Collaborative Learning Management System with AI-Driven Learning Analytics}
+
+\maketitle
+\begin{abstract}
+Online academic platforms that combine course management, assignment submission, and quiz delivery face two challenges that are often addressed only partially in practice: maintaining assessment integrity, and reducing the manual feedback workload placed on instructors. This paper presents CampusLink, a MERN-stack (MongoDB, Express, React, Node.js) collaborative learning platform, and describes two complementary additions to it: a set of server-authoritative integrity controls (single-active-session enforcement and browser-based quiz proctoring with server-side violation logging), and a generative-AI-assisted personalized feedback feature built on a large language model (LLM) API. The feature analyzes a student's completed quiz results and generates a short, personalized summary of weak and strong topics with revision suggestions. Unlike conventional LMS platforms such as Google Classroom, CampusLink keeps faculty in the loop for every integrity decision (violation review and reattempt approval, with a full audit trail), while the AI feedback is advisory by design and cannot modify marks, responses, or attempt status. The platform is evaluated through functional, scalability, usability, and feedback-quality studies.
+\begin{IEEEkeywords}
+e-learning, session management, JSON Web Tokens, online assessment security, browser proctoring, generative AI, personalized feedback, large language models, MERN stack
+\end{IEEEkeywords}
+\end{abstract}
+
+\section{Introduction}
+
+Learning management systems (LMSs) have become increasingly common in higher education to support and manage instructional activities. Instructors use LMSs to post information and materials for their courses, collect and grade assignments, give quizzes, and communicate with students. For students, an LMS serves as a central repository for learning resources and course activities, streamlining submission of work and tracking of grades and progress. Nevertheless, the value of an LMS is not defined by how many features it includes~\cite{lmssuccess,lmsacceptance}.
+
+A number of existing platforms already provide the basic functions required for academic management. Google Classroom, for instance, can be used to distribute assignments, collect submissions, manage grades, and create quiz assignments using Google Forms, with the resulting grades being transferred to the Classroom grade book~\cite{googleclassroom,googlequiz}. Such platforms emphasize the benefits of having teaching and assessment tasks in one digital system. However, some assessment needs, such as browser-based monitoring, detailed records of violations, controlled quiz retakes, and complete performance analysis, are not part of the same workflow and may require extra tools or steps.
+
+\textbf{Research gap and novelty.} Existing work tends to address these needs in isolation. General-purpose platforms such as Google Classroom~\cite{googleclassroom,googlequiz} and Microsoft Teams~\cite{msteams} provide course and quiz workflows; commercial proctoring systems~\cite{proctorsurvey} concentrate on monitoring and typically operate as add-ons outside the LMS gradebook; and research on LLM-generated feedback for intelligent tutors~\cite{incontextfeedback} focuses on the quality of the feedback itself rather than on how it is isolated from assessment records inside an LMS. To the best of our knowledge, what is missing is a single platform in which (i)~integrity controls are enforced and logged on the server, (ii)~integrity incidents are resolved through a faculty-mediated, auditable reattempt process, and (iii)~LLM feedback is confined to an advisory role by construction, so that it can never alter marks or attempt status. CampusLink is designed to fill this gap.
+
+CampusLink combines teaching and assessment activities in a single web application. As shown in Fig.~\ref{fig:comparison}, it follows the basic academic workflow of Google Classroom while adding features such as timed quizzes, automatic response saving, browser-event monitoring, violation logging, faculty-controlled reattempts, performance analysis, and personalized revision support.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\columnwidth]
+    {Screenshot 2026-09-11 141500.png}
+    \caption{Learning management framework of Google Classroom and proposed CampusLink}
+    \label{fig:comparison}
+\end{figure}
+
+The application uses the MERN architecture, with MongoDB, Express.js, React, and Node.js. It provides separate interfaces for faculty and students. Faculty members can manage courses, assignments, quizzes, submissions, and performance information, while students can enroll in courses, access assignments, submit work, take timed quizzes, and view their results.
+
+Online quizzes use JWT authentication, role-based access, password hashing, backend validation, and single-session control. When a new session is established, the previous session loses access to protected resources.
+
+Each quiz can have a fixed time limit, with responses saved during the attempt and submitted automatically when the timer expires. Browser events such as loss of focus are also recorded as possible violations. If the set violation threshold is reached, the quiz can be terminated automatically. The faculty can review the recorded events and decide whether to allow a reattempt.
+
+After submission, the student can request learning feedback based on the quiz performance. The AI component identifies areas where the student needs additional revision and provides corresponding study suggestions. It does not alter the answers stored by the quiz module or change marks calculated by the application. In this way, AI is used as a learning-support component, while the assessment decisions are retained by the platform and the faculty.
+
+The main contributions of this work are as follows:
+
+\begin{itemize}
+    \item \textbf{Server-authoritative integrity controls:} single-active-session enforcement, timed quizzes with automatic submission, and browser-event proctoring whose violations are logged on the server.
+    \item \textbf{Faculty-approved quiz reattempts:} terminated attempts are retained and marked superseded, and each reattempt is approved by faculty with a recorded reason, preserving an audit history.
+    \item \textbf{Advisory AI feedback:} quiz performance (not raw answers) is used to identify weak and strong topics and provide revision suggestions, with the AI structurally separated from grading.
+    \item \textbf{Automatic response saving:} student responses are saved during a quiz, helping retain answers after an interruption.
+    \item \textbf{Notice board and dashboard:} course-related and general announcements are organized by category, and upcoming deadlines are shown to students.
+    \item \textbf{Evaluation:} functional, scalability, usability, proctoring false-positive, and AI-feedback-quality evaluations (Section~\ref{sec:results}).
+\end{itemize}
+
+The remainder of the paper is organized as follows. Section~\ref{sec:related} reviews related work and the design rationale. Section~\ref{sec:framework} explains the proposed CampusLink framework. Section~\ref{sec:results} presents the evaluation, including functional, integrity, scalability, usability, and AI-feedback results, and discusses limitations. Section~\ref{sec:conclusion} concludes the paper and outlines future work.
+
+\section{Related Work and Design Rationale}
+\label{sec:related}
+
+\subsection{Related Work}
+
+\textit{LMS and quiz platforms.} Google Classroom supports assignment distribution, grading, and quiz assignments through Google Forms~\cite{googleclassroom,googlequiz}, and Microsoft Teams offers assignments and grades within class teams~\cite{msteams}. These platforms cover the core academic workflow, but quiz integrity monitoring, violation timelines, and audited reattempts are not part of the standard quiz workflow, and instructors would need to combine additional tools. Table~\ref{tab:platform-comparison} summarizes these differences against CampusLink.
+
+\textit{Proctoring.} Commercial proctoring systems have been surveyed for their use in academic online exams~\cite{proctorsurvey}. Such systems are usually separate products from the LMS and vary in how invasive they are. CampusLink takes a lighter approach, recording a small set of browser events (fullscreen exit, tab switch, focus loss) with explicit student consent and treating them as indicators for faculty review rather than proof of misconduct.
+
+\textit{LLM-generated feedback.} Recent work studies in-context, personalized feedback generation for intelligent tutors using large language models~\cite{incontextfeedback}. CampusLink applies the same idea at the end of a quiz, but with two constraints specific to an LMS: the model receives only the question text, per-question marks, topic tags, and the score summary (no student-written answers, names, or credentials), and it has no write access to marks, responses, or attempt status.
+
+\subsection{Design Rationale}
+
+Two bodies of theory guide the design. First, formative-feedback research argues that effective feedback tells the learner what the goal is, how they are progressing, and what to do next~\cite{hattie}. CampusLink's feedback maps onto this directly: the topic-level mastery view shows progress, the identified gaps show where the learner falls short, and the revision suggestions provide the next step. Second, technology acceptance research holds that perceived usefulness and perceived ease of use drive adoption of learning systems~\cite{lmsacceptance,davis}. This motivates keeping the AI component advisory (so that instructors can trust the system), keeping the proctoring light and consent-based (so that students find it acceptable), and evaluating usability explicitly in Section~\ref{sec:results}.
+
+\section{Proposed CampusLink Framework}
+\label{sec:framework}
+
+CampusLink was designed using the three-tier MERN model, with React.js as the front end, Express.js as the back end, and MongoDB as the database. The overall architecture is shown in Fig.~\ref{fig:campuslink-framework}. The application has two dashboards: one for faculty members and the other for students. Each dashboard provides different features depending on the role of the user. For instance, the faculty dashboard allows professors to add courses, assignments, quizzes, and grades, while the student dashboard enables learners to enroll in courses, submit assignments, take quizzes, and check their results.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth,keepaspectratio]
+    {Screenshot 2026-09-09 142918.png}
+    \caption{Overall Framework of the CampusLink System}
+    \label{fig:campuslink-framework}
+\end{figure}
+
+The React client communicates with the backend using REST-based API requests. The Express.js backend handles the main application operations, including authentication, authorization, course management, assignment processing, quiz creation and attempts, and result retrieval. JWT-based middleware is used to verify authenticated requests, while role-based access control restricts faculty and student users to the functions available to their respective roles.
+
+MongoDB was used as the database to store the application's data, including users' data, courses, assignments, submissions, quizzes, questions, and responses. Mongoose was used to define the schema for the data stored in MongoDB~\cite{mongoose} and as an intermediary between Express.js and MongoDB. The frontend does not have a direct connection with the database. Instead, all requests from the frontend are directed to the backend and then to the database. This approach decouples the user interface, application logic, and data storage layers, thus improving the application's overall design and ease of maintenance.
+
+JWT-based authentication is used in CampusLink to manage access to the application~\cite{jwt}. During registration, users enter their required personal details, which are stored in the database. Passwords are processed using bcrypt before storage, ensuring that the original passwords are not retained in plain text. This provides an additional layer of protection for user credentials~\cite{owaspPassword}.
+
+Once a user successfully logs in, CampusLink generates a JSON Web Token (JWT), which is used when accessing protected parts of the application. These include the course, assignment, quiz, grade, and result modules. Authentication middleware checks the token before processing a request and also verifies the user's role. This ensures that students and faculty members can access only the functions available to their respective roles.
+
+Each login also generates a random session identifier, which is embedded in the JWT and stored on the user's record as the account's single active session. Every protected request compares the session identifier in the token with the stored value; if they do not match, access to the requested resource is refused, so a new login on another device invalidates the earlier session. A user's session is also ended when the user logs out or resets the password, preventing an expired session from being used to access the application.
+
+\subsection{Quiz Proctoring Subsystem}
+
+The quiz proctoring subsystem comes into operation when a student starts a timed quiz. Before the attempt begins, an instruction screen is shown and the student is asked to switch to fullscreen mode. Since browser fullscreen access requires a direct action from the user, entering fullscreen cannot be triggered automatically by the system.
+
+Once the quiz is underway, the system keeps track of browser events that can indicate that the student has moved away from the assessment window. The Page Visibility API is used to detect events such as tab switching and window minimization~\cite{visibilityapi}. The \texttt{fullscreenchange} event is used to identify when fullscreen mode is exited, while the \texttt{window.blur} event detects when the browser loses focus~\cite{fullscreenapi}.
+
+Once one of these events is triggered, the data is sent to the backend and linked to an in-progress quiz attempt. By keeping this data on the backend, the information persists even if the temporary state in the browser is lost. A warning message is displayed to the student when a violation is triggered, and the quiz is stopped once a specified number of violations has occurred.
+
+Browser-event monitoring is meant to support review, rather than to serve as conclusive evidence of misconduct. For example, a fullscreen exit or loss of focus could also occur due to a legitimate technical issue. As such, these events are reviewed by faculty and evaluated in the context of the assessment.
+
+\subsection{Reattempt Workflow}
+
+If a quiz attempt is terminated after the configured proctoring limit is reached, the student cannot immediately start another attempt. The faculty member first reviews the previous attempt and decides whether a reattempt should be granted. When approval is given, a brief reason is recorded along with the reattempt.
+
+The terminated attempt is not deleted. Instead, it is retained in the database and marked as superseded. A new response record is created for the next attempt number when the student is allowed to retry the quiz. A compound unique index is used to ensure that the same student, quiz, and attempt number cannot produce duplicate records~\cite{mongoIndex}.
+
+For the current result history and class-level statistics, only the active attempt is considered. The earlier attempt remains available to faculty members for reviewing the assessment history, but it does not affect the current performance statistics.
+
+This workflow is particularly useful when an attempt is ended because of a technical problem or another legitimate situation. Faculty members can review the recorded events, decide whether another attempt is justified, and retain the original assessment record for reference.
+
+\subsection{AI-Assisted Feedback}
+One of the proposed system's key features is the use of AI-assisted learning feedback within the quiz workflow. Instead of limiting the quiz outcome to the final score, CampusLink uses the performance data collected from the quiz to identify areas that require further attention and recommend specific topics for revision. The AI component is intended to support students in their learning rather than replace the faculty or the institution's grading system.
+
+Once a quiz has been submitted, the quiz module first calculates the score using the existing assessment logic of the platform. When the student then requests feedback, the system prepares a structured request containing the question text, the marks obtained on each question, the topic associated with each question, the per-topic totals, and the overall quiz score. Short-answer questions that the faculty has not yet graded are excluded from the topic analysis. Student-written answers, names, passwords, and authentication information are not sent to the AI service. This keeps the information provided to the AI focused on the student's learning performance.
+
+The resulting summary is sent to an external large language model (LLM) API (Google Gemini, model \texttt{gemini-3.8-flash}, free tier) through the AI feedback engine shown in Fig.~\ref{fig:campuslink-framework}. The LLM uses this information to identify topics that may need further revision and generates short, personalized study suggestions. Once the response is received, the generated feedback is stored with the attempt, so that it is generated only once per attempt, and is displayed to the student. Example outputs are presented in Section~\ref{sec:aieval}.
+
+The AI output is deliberately kept advisory. The assessment module calculates and stores the quiz score before the feedback generation process begins. As a result, the LLM has no role in modifying marks, changing quiz responses, terminating quiz attempts, or making academic decisions. Keeping these functions separate allows the AI component to provide personalized learning support while the actual assessment records remain under the control of the platform and faculty members.
+
+% ============================================================
+% RESULTS
+% ============================================================
+\section{Results and Evaluation}
+\label{sec:results}
+
+The implemented CampusLink platform was evaluated on five aspects: functional correctness, assessment integrity, reattempt handling, AI-assisted feedback, and scalability and usability. The functional tests covered authentication, course and assignment management, quiz attempts, assessment-integrity features, reattempt processing, and AI-assisted feedback, and checked whether each workflow performed as expected and whether the resulting information was correctly maintained across the student and faculty interfaces.
+
+\subsection{Functional Evaluation}
+
+The authentication workflow was tested by using the same student account from two separate client instances. Once the account was authenticated on the second client, requests from the previously active client to protected routes were rejected. The affected client then cleared its stored authentication information and redirected the user back to the login interface. This test showed that the server-side session state can invalidate an earlier session without requiring the first client to remain continuously connected.
+
+The course and assignment workflows were tested using both faculty and student dashboards. Faculty users were able to create courses, publish assignments, review submissions, assign grades, and view submission statistics. On the student side, users could enroll in courses, access assigned work, submit assignments, and view their grades. The role-based access-control checks also prevented users from accessing functions that were outside their assigned responsibilities.
+
+The quiz workflow was tested with multiple-choice, true-or-false, and short-answer questions. Students could start timed quiz attempts, save their responses while answering, submit completed quizzes, and view the resulting scores. Faculty users were able to review quiz submissions and access course-level performance information. Automatic response saving also preserved answers when students moved between questions, reducing the possibility of losing entered responses because of temporary interruptions.
+
+\subsection{Assessment Integrity Evaluation}
+
+Before a timed quiz starts, the system displays a consent screen explaining the fullscreen requirement and the browser events that may be recorded during the attempt. The student must accept the fullscreen requirement before proceeding with the quiz, as shown in Fig.~\ref{fig:proctor-start}.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\columnwidth]{Camera Roll/fig2.png}
+    \caption{Proctoring consent screen displayed before the start of a timed quiz.}
+    \label{fig:proctor-start}
+\end{figure}
+
+During the quiz, the application records events such as exiting fullscreen mode, switching tabs, and losing browser focus. These events are associated with the ongoing quiz attempt and treated as possible violations. When such an event occurs, a warning is displayed to the student along with the number of violations remaining, as shown in Fig.~\ref{fig:proctor-warning}.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\columnwidth]{Camera Roll/fig3.png}
+    \caption{Proctoring warning displayed after a fullscreen violation during a timed quiz.}
+    \label{fig:proctor-warning}
+\end{figure}
+
+The termination process was tested by deliberately generating repeated qualifying violations during a quiz attempt. After the configured violation limit was reached, the system ended the quiz automatically. Responses that had already been saved were retained. The recorded events remain available for faculty members to examine and are considered indicators for review rather than direct proof of academic misconduct.
+
+\textbf{False-positive test.} To estimate how often legitimate behavior triggers a violation, we scripted honest-behavior sessions with Playwright 1.65.1 in visible (headed) browser windows on Windows~11, using Chromium 159 and Microsoft Edge 157. Each session was a fresh quiz attempt in which the student entered fullscreen, waited 1.5~s, performed one behavior once, and waited 2.5~s; violations were counted from the server-side log. Six honest behaviors were each run 10 times per browser (Table~\ref{tab:falsepos}). Across these 120 sessions, 40 (33.3\%) produced at least one recorded violation, and none reached the termination threshold of three violations, as every violating session recorded exactly one. All of the violations came from two behaviors that triggered in every run on both browsers: leaving fullscreen once, which is the effect of an accidental Esc press, and an \texttt{alert()} dialog, which takes focus from the quiz window. Normal clicks, a 3~s network drop, resizing the page viewport, and a pop-up window produced no violations. A deliberate tab switch, used as a positive control, was recorded in 20 of 20 sessions. Operating-system notifications, switching to another application, opening developer tools, and the Firefox and Safari browsers could not be reproduced with this setup and were not covered. These figures measure false triggers under controlled conditions only; the true misconduct-detection rate was not measured (see Section~\ref{sec:limits}).
+
+\begin{table}[!t]
+\centering
+\caption{Proctoring false-positive test: sessions (out of 10 per browser) that recorded at least one violation. No session reached the termination threshold.}
+\label{tab:falsepos}
+\footnotesize
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Behavior (performed once)} & \textbf{Chromium} & \textbf{Edge} \\
+\hline
+Normal clicks inside the page (control) & 0 & 0 \\
+\hline
+Network drop (3~s offline) & 0 & 0 \\
+\hline
+Leaving fullscreen once (accidental Esc) & 10 & 10 \\
+\hline
+Page viewport resize & 0 & 0 \\
+\hline
+\texttt{alert()} dialog (dismissed after 1.5~s) & 10 & 10 \\
+\hline
+Pop-up window (closed after 1.5~s) & 0 & 0 \\
+\hline
+\hline
+Tab switch for 2~s (positive control) & 10 & 10 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Reattempt Evaluation}
+
+The reattempt workflow was evaluated using a terminated quiz attempt. The faculty submission view displays the recorded proctoring status and allows the faculty member to grant a reattempt, as shown in Fig.~\ref{fig:faculty-reattempt}. It allows faculty members to analyze the incident leading to termination, such as system malfunctions and other legitimate reasons, before the reattempt is approved.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{Camera Roll/fig0.png}
+    \caption{Faculty-side submission view for a terminated quiz attempt, including the option to grant a reattempt.}
+    \label{fig:faculty-reattempt}
+\end{figure}
+
+After a reattempt was authorized, the original assessment record was retained for audit purposes and a new attempt was created with the next attempt number. The superseded attempt was no longer part of the active assessment statistics, but was retained in the historical record. This maintains the original event history while providing faculty members with flexibility in dealing with legitimate cases without loss of the assessment record.
+
+\subsection{AI-Assisted Learning Evaluation}
+\label{sec:aieval}
+The AI-based feedback mechanism was evaluated using completed quiz attempts. After a quiz is submitted, the backend prepares a structured summary containing the marks obtained on each question, the topics associated with the questions, and the student's calculated score. This summary is then sent to the AI component for analysis. Based on the quiz performance, the AI identifies topics that may require further revision and generates concise study suggestions for the student. The generated feedback is displayed after quiz completion and is used only for learning support; the quiz score remains calculated by the application.
+
+Fig.~\ref{fig:ai-feedback} shows an example where the system detects an area of concern requiring revision. The detected topic is presented with a brief description of the mistake and a suggested action for revision. The scoring remains under the calculation of the application; hence, the marks are not influenced by the AI.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{fig5.png}
+    \caption{AI-assisted personalized feedback generated after quiz completion, highlighting a weak topic and revision recommendation.}
+    \label{fig:ai-feedback}
+\end{figure}
+The system also identifies topics in which a student demonstrates strong performance. Fig.~\ref{fig:strong-topics} shows a performance summary that highlights mastered topics and encourages the student to progress to more advanced material. This allows the same question-level assessment data to support both revision guidance for weaker topics and reinforcement of stronger learning areas.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{fig6.png}
+    \caption{AI-assisted performance summary highlighting topics in which the student demonstrated strong performance.}
+    \label{fig:strong-topics}
+\end{figure}
+
+\textbf{Feedback-quality rating.} To assess the quality of the generated feedback, \tbd{n$_f$} faculty members independently rated a sample of \tbd{N$_s$} feedback outputs on accuracy (does it name topics the student actually got wrong), relevance, and actionability, using a 5-point scale. Mean ratings were \tbd{a}, \tbd{r}, and \tbd{t} respectively, with inter-rater agreement of \tbd{$\kappa$ or ICC}. In addition, \tbd{x\%} of outputs named at least one topic that the student had answered correctly, and \tbd{y\%} contained content judged inaccurate.
+
+\subsection{Scalability and Usability Evaluation}
+
+\textbf{Load test.} To address behavior at class scale, we simulated 25, 50, and 100 concurrent students across one and five concurrent courses (six configurations) using k6 v2.4.0. All virtual students in a configuration started at the same instant; each logged in, started the timed quiz of its course, saved one answer approximately every 3~s ($\pm$30\% jitter) for all ten questions, and then submitted. The backend ran as a single Node.js v26.10.0 process on a laptop (Intel Core i5-11400H, 12 logical cores, 16~GB RAM, Windows~11) and was restarted before each configuration; the database was a shared MongoDB Atlas M0 free-tier cluster (MongoDB 8.0.37) with a median round trip of 26.9~ms from the server, and the load generator ran on the same machine as the backend. None of the 4,550 requests across the six configurations failed. Table~\ref{tab:load} reports the largest configuration and Table~\ref{tab:load-levels} all six. Autosave and submit stayed at a median of 60--98~ms under every load, although their 95th percentiles rose to 0.3--1.0~s at 100 students. Starting a quiz was the slowest operation and grew roughly in proportion to the number of students starting simultaneously (median 1.1, 2.8, and 5.8~s for 25, 50, and 100 students); spreading the students over five courses did not change this, so the cost is not due to contention on a single quiz.
+
+The single-session check was exercised with 20 accounts concurrently, each logged in from two clients. When the second client logged in after the first, the first session was rejected on its very first subsequent request for 20 of 20 accounts and was still rejected 35~s later, after the 30~s server-side session cache had expired, while the second session remained valid for 20 of 20. When both clients logged in at the same instant, exactly one of the two sessions remained valid for 20 of 20 accounts; in no case were both or neither valid.
+
+\begin{table}[!t]
+\centering
+\caption{Load-test results with 100 concurrent students across 5 courses (k6, single Node.js process, MongoDB Atlas M0).}
+\label{tab:load}
+\footnotesize
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Operation} & \textbf{p50 (ms)} & \textbf{p95 (ms)} & \textbf{Error rate} \\
+\hline
+Login & 1748 & 2599 & 0\% \\
+\hline
+Quiz start & 5786 & 6086 & 0\% \\
+\hline
+Autosave response & 60 & 447 & 0\% \\
+\hline
+Quiz submit & 98 & 999 & 0\% \\
+\hline
+AI feedback generation & \multicolumn{3}{c|}{N/A (requested separately, not on submit)} \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[!t]
+\centering
+\caption{Median / 95th-percentile response time (ms) for each load configuration; $N$ = concurrent students, $C$ = courses. Error rate was 0\% in every cell.}
+\label{tab:load-levels}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+$\boldsymbol{N}$ & $\boldsymbol{C}$ & \textbf{Login} & \textbf{Quiz start} & \textbf{Autosave} & \textbf{Submit} \\
+\hline
+25  & 1 & 516 / 626   & 1106 / 1448 & 61 / 84  & 90 / 98 \\
+50  & 1 & 667 / 1578  & 2758 / 3029 & 62 / 87  & 90 / 130 \\
+100 & 1 & 1692 / 2540 & 5793 / 6019 & 60 / 334 & 98 / 1010 \\
+\hline
+25  & 5 & 788 / 909   & 1068 / 1887 & 60 / 88  & 90 / 95 \\
+50  & 5 & 699 / 1557  & 2862 / 2946 & 62 / 92  & 90 / 102 \\
+100 & 5 & 1748 / 2599 & 5786 / 6086 & 60 / 447 & 98 / 999 \\
+\hline
+\end{tabular}
+\end{table}
+
+The mean LLM feedback latency was \tbd{s} seconds and the estimated cost was \tbd{cost} per quiz submission.
+
+\textbf{Usability.} \tbd{n$_s$} students and \tbd{n$_f$} faculty members used the platform for \tbd{task description} and completed the System Usability Scale (SUS) questionnaire. The mean SUS score was \tbd{score} for students and \tbd{score} for faculty.
+
+\subsection{Implementation Comparison with Google Classroom}
+
+To compare the two systems at the implementation level, the CampusLink quiz interface was evaluated alongside the Google Forms-based quiz workflow used with Google Classroom, as shown in Fig.~\ref{fig:google-forms-quiz} and Fig.~\ref{fig:campuslink-quiz}. Both platforms support online quiz delivery and response submission. However, CampusLink combines these basic functions with timed assessment, automatic response saving, browser-based monitoring, violation logging, and controlled reattempts within the same quiz workflow. Table~\ref{tab:platform-comparison} summarizes the major feature-level differences, based on the standard quiz workflows of each platform~\cite{googleclassroom,googlequiz}; add-ons and third-party proctoring tools are outside this comparison.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{Screenshot 2026-09-10 021944.png}
+    \caption{Google Forms-based quiz workflow.}
+    \label{fig:google-forms-quiz}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{Screenshot 2026-09-10 022417.png}
+    \caption{CampusLink quiz interface.}
+    \label{fig:campuslink-quiz}
+\end{figure}
+
+\FloatBarrier
+
+\begin{table}[!t]
+\caption{Implementation comparison between Google Classroom and proposed CampusLink.}
+\label{tab:platform-comparison}
+\centering
+\scriptsize
+\renewcommand{\arraystretch}{1.08}
+\begin{tabular}{|p{1.45cm}|p{2.55cm}|p{2.55cm}|}
+\hline
+\textbf{Features} & \textbf{Google Classroom} & \textbf{Proposed CampusLink} \\
+\hline
+Quiz Assessment &
+Forms-based quizzes with basic auto-grading. &
+Integrated quiz engine with MCQ, True/False, and short-answer support. \\
+\hline
+Timed Examination &
+Basic assignment deadlines; limited live exam timing. &
+Live countdown timer with automatic submission. \\
+\hline
+Flexible Marking &
+Conventional grade-based evaluation. &
+Question-level partial and decimal marks. \\
+\hline
+Browser-Based Proctoring &
+No native browser monitoring in the standard quiz workflow. &
+Fullscreen enforcement with tab-switch and browser-focus monitoring. \\
+\hline
+Violation Tracking &
+No dedicated quiz violation timeline. &
+Timestamped violation logs with configurable thresholds. \\
+\hline
+Performance Analytics &
+Gradebook and general Classroom analytics. &
+Question-, topic-, and quiz-level performance analytics. \\
+\hline
+Reattempt \& Audit &
+Manual reassignment; no dedicated reattempt audit workflow. &
+Controlled reattempt with reason, approval, and audit history. \\
+\hline
+\end{tabular}
+\end{table}
+
+The Google Forms-based workflow provides a conventional form-based assessment interface for entering and submitting responses. In contrast, CampusLink provides an integrated quiz environment with a live countdown timer and assessment monitoring. End-to-end testing confirmed response retention, automatic submission after expiry, violation recording, and faculty-authorized reattempts with preserved audit history.
+
+\subsection{Limitations}
+\label{sec:limits}
+
+Several limitations should be noted. First, browser-event proctoring can be circumvented (for example, by using a second device or a virtual machine) and can produce false positives from notifications, accidental key presses, or assistive technologies; the system therefore treats events as indicators for faculty review, not as proof, and the automatic termination threshold is configurable. The false-positive test confirmed this for two common behaviors (leaving fullscreen and a dialog box), but it covered only Chromium-based browsers and scripted behaviors; real keyboard shortcuts, OS notifications, and other browsers remain to be tested manually. Second, client-side events can in principle be spoofed or suppressed by a determined user, so the server-side log should be viewed as a record of reported events, not as tamper-proof evidence. Third, sending topic-level performance data to an external LLM API raises privacy and cost considerations, which is why student-written answers and credentials are excluded. Fourth, the load test used a single backend process, a shared free-tier database, and a load generator on the same machine, so absolute latencies would differ on production infrastructure; in particular, the server caches each account's active session for up to 30~s per process, so a deployment with several backend instances was not tested and could accept an invalidated session on another instance for up to that period. Finally, the usability and feedback-quality studies involve a limited number of participants, and learning outcomes were not measured; a larger controlled study would be needed to quantify learning effectiveness and assessment effectiveness.
+
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+CampusLink brings course management, assignments, quizzes, grading, assessment monitoring, and AI-assisted feedback together in a single MERN-based platform. The system provides separate workflows for students and faculty, and functional testing was carried out for authentication, role-based access, timed quizzes, automatic response saving, browser-event monitoring, and faculty-managed quiz reattempts. When an attempt is terminated, its record is retained so that the related assessment history can still be reviewed.
+
+The AI-based feedback module analyzes topic-wise quiz scores and uses the results to recommend areas for revision. The feedback generated by the module is kept separate from the grading process and does not affect quiz scores or academic performance decisions.
+
+Future development of the CampusLink project can include wider trials involving more students and instructors, studies of learning outcomes, improvements to collaboration features, accessibility, mobile support, and learning analytics, and a class-level view of topic difficulty for faculty. The efficiency and cost of using LLM-based feedback can also be studied in greater detail.
+
+% ============================================================
+% REFERENCES  (ordered by first citation in the text)
+% ============================================================
+\begin{thebibliography}{00}
+
+% [1]
+\bibitem{lmssuccess}
+D. Al-Fraihat, M. Joy, R. Masa'deh, and J. Sinclair,
+``Evaluating e-learning systems success: An empirical study,''
+\emph{Computers in Human Behavior}, vol. 102, pp. 67--86, 2020,
+doi: 10.1016/j.chb.2019.08.004.
+
+% [2]
+\bibitem{lmsacceptance}
+M. N. Al-Nuaimi and M. Al-Emran,
+``Learning management systems and technology acceptance models: A systematic review,''
+\emph{Education and Information Technologies}, vol. 26,
+pp. 5499--5533, 2021,
+doi: 10.1007/s10639-021-10513-3.
+
+% [3]
+\bibitem{googleclassroom}
+Google,
+``Google Classroom Help,''
+Google for Education, 2026. [Online]. Available:
+\url{https://support.google.com/edu/classroom/}.
+
+% [4]
+\bibitem{googlequiz}
+Google,
+``Create a quiz assignment,''
+\emph{Classroom Help}. [Online]. Available:
+\url{https://support.google.com/edu/classroom/answer/9095575?hl=en}.
+
+% [5]
+\bibitem{msteams}
+Microsoft,
+``Assignments and grades in your class team,''
+\emph{Microsoft Support}. [Online]. Available:
+\url{https://support.microsoft.com/en-us/education/assignments/assignments-and-grades-in-your-class-team}.
+
+% [6]
+\bibitem{proctorsurvey}
+S. Arn\`o, A. Galassi, M. Tommasi, A. Saggino, and P. Vittorini,
+``State-of-the-art of commercial proctoring systems and their use in
+academic online exams,''
+\emph{International Journal of Distance Education Technologies},
+vol. 19, no. 2, pp. 41--62, 2021,
+doi: 10.4018/IJDET.20210401.oa3.
+
+% [7]
+\bibitem{incontextfeedback}
+``Generating In-Context, Personalized Feedback for Intelligent Tutors
+with Large Language Models,''
+\emph{International Journal of Artificial Intelligence in Education}, 2025.
+
+% [8]
+\bibitem{hattie}
+J. Hattie and H. Timperley,
+``The power of feedback,''
+\emph{Review of Educational Research}, vol. 77, no. 1,
+pp. 81--112, 2007.
+
+% [9]
+\bibitem{davis}
+F. D. Davis,
+``Perceived usefulness, perceived ease of use, and user acceptance of
+information technology,''
+\emph{MIS Quarterly}, vol. 13, no. 3, pp. 319--340, 1989.
+
+% [10]
+\bibitem{mongoose}
+MongoDB, Inc.,
+``Integrate with Mongoose,''
+\emph{MongoDB Documentation}. [Online]. Available:
+\url{https://www.mongodb.com/docs/drivers/node/current/integrations/mongoose/}.
+
+% [11]
+\bibitem{jwt}
+M. Jones, J. Bradley, and N. Sakimura,
+``JSON Web Token (JWT),''
+RFC 7519, Internet Engineering Task Force, May 2015.
+
+% [12]
+\bibitem{owaspPassword}
+OWASP Foundation,
+``Password Storage Cheat Sheet,''
+\emph{OWASP Cheat Sheet Series}. [Online]. Available:
+\url{https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html}.
+
+% [13]
+\bibitem{visibilityapi}
+Mozilla Developer Network,
+``Page Visibility API,''
+MDN Web Docs. [Online]. Available:
+\url{https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API}.
+
+% [14]
+\bibitem{fullscreenapi}
+Mozilla Developer Network,
+``Fullscreen API,''
+MDN Web Docs. [Online]. Available:
+\url{https://developer.mozilla.org/en-US/docs/Web/API/Fullscreen_API}.
+
+% [15]
+\bibitem{mongoIndex}
+MongoDB, Inc.,
+``Unique Indexes,''
+MongoDB Documentation. [Online]. Available:
+\url{https://www.mongodb.com/docs/manual/core/index-unique/}.
+
+\end{thebibliography}
+
+\end{document}

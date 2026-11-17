@@ -1,0 +1,13 @@
+{
+  "recordedAt": "2026-11-17T20:43:49.044Z",
+  "cpu": "11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz",
+  "cpuLogicalCores": 12,
+  "ramGB": 15.7,
+  "os": "Windows 11 Home Single Language (win32 10.0.26200, x64)",
+  "node": "v26.10.0",
+  "mongodb": "8.0.37",
+  "mongoHost": "***.vb0am0a.mongodb.net",
+  "mongoIsAtlas": true,
+  "mongoPingMedianMs": 26.5,
+  "mongoPingMaxMs": 29.1
+}

@@ -1,0 +1,17 @@
+browser,scenario,label,expected,runs,valid_runs,runs_with_violation,runs_terminated,total_violations,fullscreen_at_start,errored_runs,reasons
+chromium,f_control_click,(f) Normal clicks inside the page (control),none,10,10,0,0,0,10,0,
+chromium,a_network_drop,(a) Brief network drop (3 s offline),none,10,10,0,0,0,10,0,
+chromium,b2_fullscreen_exit,(b) Effect of a real Esc: fullscreen exited once,none,10,10,10,0,10,10,0,Exited fullscreen mode
+chromium,b1_escape_keypress,(b) Esc key event sent to the page (synthetic),none,10,10,0,0,0,10,0,
+chromium,c_window_resize,(c) Window resize,none,10,10,0,0,0,10,0,
+chromium,d1_alert_dialog,"(d) alert() dialog appears, dismissed after 1.5 s",none,10,10,10,0,10,10,0,Quiz window lost focus
+chromium,d2_popup_window,"(d) Pop-up window opens, closed after 1.5 s",none,10,10,0,0,0,10,0,
+chromium,g_tab_switch,(g) Deliberate tab switch for 2 s (positive control),violation,10,10,10,0,10,10,0,Quiz window lost focus
+msedge,f_control_click,(f) Normal clicks inside the page (control),none,10,10,0,0,0,10,0,
+msedge,a_network_drop,(a) Brief network drop (3 s offline),none,10,10,0,0,0,10,0,
+msedge,b2_fullscreen_exit,(b) Effect of a real Esc: fullscreen exited once,none,10,10,10,0,10,10,0,Exited fullscreen mode
+msedge,b1_escape_keypress,(b) Esc key event sent to the page (synthetic),none,10,10,4,0,4,10,0,Quiz window lost focus
+msedge,c_window_resize,(c) Window resize,none,10,10,0,0,0,10,0,
+msedge,d1_alert_dialog,"(d) alert() dialog appears, dismissed after 1.5 s",none,10,10,10,0,10,10,0,Quiz window lost focus
+msedge,d2_popup_window,"(d) Pop-up window opens, closed after 1.5 s",none,10,10,0,0,0,10,0,
+msedge,g_tab_switch,(g) Deliberate tab switch for 2 s (positive control),violation,10,10,10,0,10,10,0,Quiz window lost focus

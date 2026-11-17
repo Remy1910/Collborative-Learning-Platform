@@ -1,0 +1,19 @@
+{
+  "name": "campuslink-evaluation",
+  "private": true,
+  "type": "module",
+  "description": "Evaluation tests for CampusLink (seed, load, proctoring, AI feedback). Uses the server's models and server/.env.",
+  "scripts": {
+    "seed": "node seed/seed.mjs",
+    "cleanup": "node seed/cleanup.mjs",
+    "reset-attempts": "node seed/cleanup.mjs --attempts-only",
+    "load": "node load/run-load.mjs",
+    "proctoring": "node proctoring/run-proctoring.mjs",
+    "ai": "node ai/run-ai.mjs",
+    "ai-report": "node ai/run-ai.mjs --report-only",
+    "ratings": "node ai/analyze-ratings.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
+}

@@ -1,0 +1,2 @@
+
+N=25 C=5  login: p50=788 p95=909 max=1697 err=0.0% | start: p50=1068 p95=1887 max=1905 err=0.0% | autosave: p50=60 p95=88 max=115 err=0.0% | submit: p50=90 p95=95 max=107 err=0.0%
