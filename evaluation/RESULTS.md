@@ -159,4 +159,4 @@ Single levels: `node load/run-load.mjs --levels 25 --courses 1 --skip-session`;
   machine; absolute latencies would differ in production.
 - **Gemini 3.8 Flash** (the app's default model): unavailable on the free tier during both test days
   (4 failed calls, logged); the AI evaluation used `gemini-3.5-flash-lite` instead.
-- **Human studies**: feedback-quality ratings and SUS usability need real participants and were not run.
+- **Human studies**: feedback-quality ratings need real raters and were not run yet. A SUS usability study was dropped from the paper for now (listed as future work).

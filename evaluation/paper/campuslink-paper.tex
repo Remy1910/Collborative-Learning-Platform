@@ -4,7 +4,7 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
-\usepackage{graphicx}ok
+\usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{hyperref}
@@ -29,7 +29,7 @@
 
 \maketitle
 \begin{abstract}
-Online academic platforms that combine course management, assignment submission, and quiz delivery face two challenges that are often addressed only partially in practice: maintaining assessment integrity, and reducing the manual feedback workload placed on instructors. This paper presents CampusLink, a MERN-stack (MongoDB, Express, React, Node.js) collaborative learning platform, and describes two complementary additions to it: a set of server-authoritative integrity controls (single-active-session enforcement and browser-based quiz proctoring with server-side violation logging), and a generative-AI-assisted personalized feedback feature built on a large language model (LLM) API. The feature analyzes a student's completed quiz results and generates a short, personalized summary of weak and strong topics with revision suggestions. Unlike conventional LMS platforms such as Google Classroom, CampusLink keeps faculty in the loop for every integrity decision (violation review and reattempt approval, with a full audit trail), while the AI feedback is advisory by design and cannot modify marks, responses, or attempt status. The platform is evaluated through functional, scalability, usability, and feedback-quality studies.
+Online academic platforms that combine course management, assignment submission, and quiz delivery face two challenges that are often addressed only partially in practice: maintaining assessment integrity, and reducing the manual feedback workload placed on instructors. This paper presents CampusLink, a MERN-stack (MongoDB, Express, React, Node.js) collaborative learning platform, and describes two complementary additions to it: a set of server-authoritative integrity controls (single-active-session enforcement and browser-based quiz proctoring with server-side violation logging), and a generative-AI-assisted personalized feedback feature built on a large language model (LLM) API. The feature analyzes a student's completed quiz results and generates a short, personalized summary of weak and strong topics with revision suggestions. Unlike conventional LMS platforms such as Google Classroom, CampusLink keeps faculty in the loop for every integrity decision (violation review and reattempt approval, with a full audit trail), while the AI feedback is advisory by design and cannot modify marks, responses, or attempt status. The platform is evaluated through functional, scalability, proctoring false-positive, and feedback-quality studies.
 \begin{IEEEkeywords}
 e-learning, session management, JSON Web Tokens, online assessment security, browser proctoring, generative AI, personalized feedback, large language models, MERN stack
 \end{IEEEkeywords}
@@ -69,10 +69,10 @@ The main contributions of this work are as follows:
     \item \textbf{Advisory AI feedback:} quiz performance (not raw answers) is used to identify weak and strong topics and provide revision suggestions, with the AI structurally separated from grading.
     \item \textbf{Automatic response saving:} student responses are saved during a quiz, helping retain answers after an interruption.
     \item \textbf{Notice board and dashboard:} course-related and general announcements are organized by category, and upcoming deadlines are shown to students.
-    \item \textbf{Evaluation:} functional, scalability, usability, proctoring false-positive, and AI-feedback-quality evaluations (Section~\ref{sec:results}).
+    \item \textbf{Evaluation:} functional, scalability, proctoring false-positive, and AI-feedback-quality evaluations (Section~\ref{sec:results}).
 \end{itemize}
 
-The remainder of the paper is organized as follows. Section~\ref{sec:related} reviews related work and the design rationale. Section~\ref{sec:framework} explains the proposed CampusLink framework. Section~\ref{sec:results} presents the evaluation, including functional, integrity, scalability, usability, and AI-feedback results, and discusses limitations. Section~\ref{sec:conclusion} concludes the paper and outlines future work.
+The remainder of the paper is organized as follows. Section~\ref{sec:related} reviews related work and the design rationale. Section~\ref{sec:framework} explains the proposed CampusLink framework. Section~\ref{sec:results} presents the evaluation, including functional, integrity, scalability, and AI-feedback results, and discusses limitations. Section~\ref{sec:conclusion} concludes the paper and outlines future work.
 
 \section{Related Work and Design Rationale}
 \label{sec:related}
@@ -87,7 +87,7 @@ The remainder of the paper is organized as follows. Section~\ref{sec:related} re
 
 \subsection{Design Rationale}
 
-Two bodies of theory guide the design. First, formative-feedback research argues that effective feedback tells the learner what the goal is, how they are progressing, and what to do next~\cite{hattie}. CampusLink's feedback maps onto this directly: the topic-level mastery view shows progress, the identified gaps show where the learner falls short, and the revision suggestions provide the next step. Second, technology acceptance research holds that perceived usefulness and perceived ease of use drive adoption of learning systems~\cite{lmsacceptance,davis}. This motivates keeping the AI component advisory (so that instructors can trust the system), keeping the proctoring light and consent-based (so that students find it acceptable), and evaluating usability explicitly in Section~\ref{sec:results}.
+Two bodies of theory guide the design. First, formative-feedback research argues that effective feedback tells the learner what the goal is, how they are progressing, and what to do next~\cite{hattie}. CampusLink's feedback maps onto this directly: the topic-level mastery view shows progress, the identified gaps show where the learner falls short, and the revision suggestions provide the next step. Second, technology acceptance research holds that perceived usefulness and perceived ease of use drive adoption of learning systems~\cite{lmsacceptance,davis}. This motivates keeping the AI component advisory (so that instructors can trust the system) and keeping the proctoring light and consent-based (so that students find it acceptable).
 
 \section{Proposed CampusLink Framework}
 \label{sec:framework}
@@ -147,7 +147,7 @@ The AI output is deliberately kept advisory. The assessment module calculates an
 \section{Results and Evaluation}
 \label{sec:results}
 
-The implemented CampusLink platform was evaluated on five aspects: functional correctness, assessment integrity, reattempt handling, AI-assisted feedback, and scalability and usability. The functional tests covered authentication, course and assignment management, quiz attempts, assessment-integrity features, reattempt processing, and AI-assisted feedback, and checked whether each workflow performed as expected and whether the resulting information was correctly maintained across the student and faculty interfaces.
+The implemented CampusLink platform was evaluated on five aspects: functional correctness, assessment integrity, reattempt handling, AI-assisted feedback, and scalability. The functional tests covered authentication, course and assignment management, quiz attempts, assessment-integrity features, reattempt processing, and AI-assisted feedback, and checked whether each workflow performed as expected and whether the resulting information was correctly maintained across the student and faculty interfaces.
 
 \subsection{Functional Evaluation}
 
@@ -246,7 +246,7 @@ The system also identifies topics in which a student demonstrates strong perform
 
 The sample consisted of 40 synthetic completed attempts spread over the five quizzes, covering six score patterns from all-correct to low scores with a single fully correct topic. Feedback was generated through the platform's own endpoint with Google Gemini \texttt{gemini-3.5-flash-lite} (free tier); the configured default, \texttt{gemini-3.8-flash}, was unavailable on the free tier on both test days, returning overload errors in all four attempted calls. Two automatic checks were applied to every output and each flagged output was then read. One output (2.5\%) was flagged for describing a fully correct topic as weak, but on reading it called that topic a strength, so none of the 40 outputs (0\%) presented a correctly answered topic as weak; 26 of the attempts had at least one fully correct topic. Five outputs (12.5\%) were flagged for naming a topic outside the quiz: in two, the model suggested advanced topics to study after a perfect score, and in three the flagged word occurred inside a quiz topic (for example, ``concurrency issues like dirty reads''), so no output introduced an unrelated topic as a weakness.
 
-\subsection{Scalability and Usability Evaluation}
+\subsection{Scalability Evaluation}
 
 \textbf{Load test.} To address behavior at class scale, we simulated 25, 50, and 100 concurrent students across one and five concurrent courses (six configurations) using k6 v2.4.0. All virtual students in a configuration started at the same instant; each logged in, started the timed quiz of its course, saved one answer approximately every 3~s ($\pm$30\% jitter) for all ten questions, and then submitted. The backend ran as a single Node.js v26.10.0 process on a laptop (Intel Core i5-11400H, 12 logical cores, 16~GB RAM, Windows~11) and was restarted before each configuration; the database was a shared MongoDB Atlas M0 free-tier cluster (MongoDB 8.0.37) with a median round trip of 26.9~ms from the server, and the load generator ran on the same machine as the backend. None of the 4,550 requests across the six configurations failed. Table~\ref{tab:load} reports the largest configuration and Table~\ref{tab:load-levels} all six. Autosave and submit stayed at a median of 60--98~ms under every load, although their 95th percentiles rose to 0.3--1.0~s at 100 students. Starting a quiz was the slowest operation and grew roughly in proportion to the number of students starting simultaneously (median 1.1, 2.8, and 5.8~s for 25, 50, and 100 students); spreading the students over five courses did not change this, so the cost is not due to contention on a single quiz.
 
@@ -296,8 +296,6 @@ $\boldsymbol{N}$ & $\boldsymbol{C}$ & \textbf{Login} & \textbf{Quiz start} & \te
 \end{table}
 
 For the 40 feedback requests, the LLM call took a mean of 4.7~s (median 2.4~s, 95th percentile 10.8~s, maximum 25.7~s), measured in the backend and including automatic retries; 2 of the 40 calls needed one retry after a provider overload error. Each call used a mean of 497 input and 196 output tokens. On the free tier used here the cost was \$0 per quiz submission, and since feedback is stored with the attempt, it is generated at most once per submission.
-
-\textbf{Usability.} \tbd{n$_s$} students and \tbd{n$_f$} faculty members used the platform for \tbd{task description} and completed the System Usability Scale (SUS) questionnaire. The mean SUS score was \tbd{score} for students and \tbd{score} for faculty.
 
 \subsection{Implementation Comparison with Google Classroom}
 
@@ -365,7 +363,7 @@ The Google Forms-based workflow provides a conventional form-based assessment in
 \subsection{Limitations}
 \label{sec:limits}
 
-Several limitations should be noted. First, browser-event proctoring can be circumvented (for example, by using a second device or a virtual machine) and can produce false positives from notifications, accidental key presses, or assistive technologies; the system therefore treats events as indicators for faculty review, not as proof, and the automatic termination threshold is configurable. The false-positive test confirmed this for two common behaviors (leaving fullscreen and a dialog box), but it covered only Chromium-based browsers and scripted behaviors; real keyboard shortcuts, OS notifications, and other browsers remain to be tested manually. Second, client-side events can in principle be spoofed or suppressed by a determined user, so the server-side log should be viewed as a record of reported events, not as tamper-proof evidence. Third, sending topic-level performance data to an external LLM API raises privacy and cost considerations, which is why student-written answers and credentials are excluded. Fourth, the load test used a single backend process, a shared free-tier database, and a load generator on the same machine, so absolute latencies would differ on production infrastructure; in particular, the server caches each account's active session for up to 30~s per process, so a deployment with several backend instances was not tested and could accept an invalidated session on another instance for up to that period. Finally, the usability and feedback-quality studies involve a limited number of participants, and learning outcomes were not measured; a larger controlled study would be needed to quantify learning effectiveness and assessment effectiveness.
+Several limitations should be noted. First, browser-event proctoring can be circumvented (for example, by using a second device or a virtual machine) and can produce false positives from notifications, accidental key presses, or assistive technologies; the system therefore treats events as indicators for faculty review, not as proof, and the automatic termination threshold is configurable. The false-positive test confirmed this for two common behaviors (leaving fullscreen and a dialog box), but it covered only Chromium-based browsers and scripted behaviors; real keyboard shortcuts, OS notifications, and other browsers remain to be tested manually. Second, client-side events can in principle be spoofed or suppressed by a determined user, so the server-side log should be viewed as a record of reported events, not as tamper-proof evidence. Third, sending topic-level performance data to an external LLM API raises privacy and cost considerations, which is why student-written answers and credentials are excluded. Fourth, the load test used a single backend process, a shared free-tier database, and a load generator on the same machine, so absolute latencies would differ on production infrastructure; in particular, the server caches each account's active session for up to 30~s per process, so a deployment with several backend instances was not tested and could accept an invalidated session on another instance for up to that period. Finally, the feedback-quality study involves a limited number of raters, usability was not formally measured, and learning outcomes were not measured; a larger controlled study would be needed to quantify learning effectiveness and assessment effectiveness.
 
 \section{Conclusion and Future Work}
 \label{sec:conclusion}
@@ -374,7 +372,7 @@ CampusLink brings course management, assignments, quizzes, grading, assessment m
 
 The AI-based feedback module analyzes topic-wise quiz scores and uses the results to recommend areas for revision. The feedback generated by the module is kept separate from the grading process and does not affect quiz scores or academic performance decisions.
 
-Future development of the CampusLink project can include wider trials involving more students and instructors, studies of learning outcomes, improvements to collaboration features, accessibility, mobile support, and learning analytics, and a class-level view of topic difficulty for faculty. The efficiency and cost of using LLM-based feedback can also be studied in greater detail.
+Future development of the CampusLink project can include wider trials involving more students and instructors, a formal usability study (e.g., with the System Usability Scale), studies of learning outcomes, improvements to collaboration features, accessibility, mobile support, and learning analytics, and a class-level view of topic difficulty for faculty. The efficiency and cost of using LLM-based feedback can also be studied in greater detail.
 
 % ============================================================
 % REFERENCES  (ordered by first citation in the text)
