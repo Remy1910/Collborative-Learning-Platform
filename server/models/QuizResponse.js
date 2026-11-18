@@ -82,6 +82,7 @@ const quizResponseSchema = new mongoose.Schema(
       model: String,
       generatedAt: Date,
       latencyMs: Number,
+      attempts: Number,
       inputTokens: Number,
       outputTokens: Number
     },

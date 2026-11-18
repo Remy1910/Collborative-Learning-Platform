@@ -88,15 +88,36 @@ const buildPrompt = (quiz, response, { byTopic, questions }) => {
   ].join("\n");
 };
 
+// Google returns these when the model is briefly overloaded; worth another try after a pause
+const RETRYABLE_STATUSES = [500, 503, 504];
+const RETRY_DELAYS_MS = [5000, 15000];
+
 const callModel = async (quiz, response) => {
   const summary = summarizeByTopic(response);
   const started = Date.now();
 
-  const result = await getClient().models.generateContent({
-    model: MODEL,
-    contents: buildPrompt(quiz, response, summary),
-    config: { systemInstruction: SYSTEM_PROMPT }
-  });
+  let result;
+  let attempts = 0;
+  for (;;) {
+    if (callsMade >= MAX_CALLS) {
+      throw feedbackError(429, "AI feedback limit reached on this server");
+    }
+    callsMade++;
+    attempts++;
+    try {
+      result = await getClient().models.generateContent({
+        model: MODEL,
+        contents: buildPrompt(quiz, response, summary),
+        config: { systemInstruction: SYSTEM_PROMPT }
+      });
+      break;
+    } catch (error) {
+      const delay = RETRY_DELAYS_MS[attempts - 1];
+      if (!(error instanceof ApiError) || !RETRYABLE_STATUSES.includes(error.status) || delay === undefined) throw error;
+      console.error(`AI feedback: Gemini API error ${error.status}, retrying in ${delay / 1000} s`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
 
   if (result.promptFeedback?.blockReason) {
     throw feedbackError(502, "The AI model declined to write feedback for this attempt");
@@ -112,7 +133,9 @@ const callModel = async (quiz, response) => {
     text,
     model: result.modelVersion || MODEL,
     generatedAt: new Date(),
+    // Wall time including any retries, and how many requests it took
     latencyMs: Date.now() - started,
+    attempts,
     inputTokens: usage.promptTokenCount,
     // Thinking tokens count as output (that's how paid tiers bill them), so include them
     outputTokens: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0)
@@ -156,7 +179,6 @@ const generateAiFeedback = async (req, res) => {
       if (callsMade >= MAX_CALLS) {
         return res.status(429).json({ message: "AI feedback limit reached on this server" });
       }
-      callsMade++;
       pending = callModel(response.quiz, response).finally(() => inFlight.delete(responseId));
       inFlight.set(responseId, pending);
     }
@@ -181,8 +203,8 @@ const generateAiFeedback = async (req, res) => {
       }
       return res.status(502).json({ message: "AI feedback could not be generated, please try again" });
     }
-    if (error.status === 502) {
-      return res.status(502).json({ message: error.message });
+    if (error.status === 502 || error.status === 429) {
+      return res.status(error.status).json({ message: error.message });
     }
     res.status(500).json({ error: error.message });
   }
