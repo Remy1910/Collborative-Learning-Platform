@@ -4,7 +4,7 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
-\usepackage{graphicx}
+\usepackage{graphicx}ok
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{hyperref}
@@ -137,7 +137,7 @@ One of the proposed system's key features is the use of AI-assisted learning fee
 
 Once a quiz has been submitted, the quiz module first calculates the score using the existing assessment logic of the platform. When the student then requests feedback, the system prepares a structured request containing the question text, the marks obtained on each question, the topic associated with each question, the per-topic totals, and the overall quiz score. Short-answer questions that the faculty has not yet graded are excluded from the topic analysis. Student-written answers, names, passwords, and authentication information are not sent to the AI service. This keeps the information provided to the AI focused on the student's learning performance.
 
-The resulting summary is sent to an external large language model (LLM) API (Google Gemini, model \texttt{gemini-3.8-flash}, free tier) through the AI feedback engine shown in Fig.~\ref{fig:campuslink-framework}. The LLM uses this information to identify topics that may need further revision and generates short, personalized study suggestions. Once the response is received, the generated feedback is stored with the attempt, so that it is generated only once per attempt, and is displayed to the student. Example outputs are presented in Section~\ref{sec:aieval}.
+The resulting summary is sent to an external large language model (LLM) API (Google Gemini, free tier; the model is configurable, and the evaluation in Section~\ref{sec:aieval} used \texttt{gemini-3.5-flash-lite}) through the AI feedback engine shown in Fig.~\ref{fig:campuslink-framework}. The LLM uses this information to identify topics that may need further revision and generates short, personalized study suggestions. Once the response is received, the generated feedback is stored with the attempt, so that it is generated only once per attempt, and is displayed to the student. Example outputs are presented in Section~\ref{sec:aieval}.
 
 The AI output is deliberately kept advisory. The assessment module calculates and stores the quiz score before the feedback generation process begins. As a result, the LLM has no role in modifying marks, changing quiz responses, terminating quiz attempts, or making academic decisions. Keeping these functions separate allows the AI component to provide personalized learning support while the actual assessment records remain under the control of the platform and faculty members.
 
@@ -242,7 +242,9 @@ The system also identifies topics in which a student demonstrates strong perform
     \label{fig:strong-topics}
 \end{figure}
 
-\textbf{Feedback-quality rating.} To assess the quality of the generated feedback, \tbd{n$_f$} faculty members independently rated a sample of \tbd{N$_s$} feedback outputs on accuracy (does it name topics the student actually got wrong), relevance, and actionability, using a 5-point scale. Mean ratings were \tbd{a}, \tbd{r}, and \tbd{t} respectively, with inter-rater agreement of \tbd{$\kappa$ or ICC}. In addition, \tbd{x\%} of outputs named at least one topic that the student had answered correctly, and \tbd{y\%} contained content judged inaccurate.
+\textbf{Feedback-quality rating.} To assess the quality of the generated feedback, \tbd{n$_f$} faculty members independently rated a sample of \tbd{N$_s$} feedback outputs on accuracy (does it name topics the student actually got wrong), relevance, and actionability, using a 5-point scale. Mean ratings were \tbd{a}, \tbd{r}, and \tbd{t} respectively, with inter-rater agreement of \tbd{$\kappa$ or ICC}, and \tbd{y\%} of outputs contained content judged inaccurate.
+
+The sample consisted of 40 synthetic completed attempts spread over the five quizzes, covering six score patterns from all-correct to low scores with a single fully correct topic. Feedback was generated through the platform's own endpoint with Google Gemini \texttt{gemini-3.5-flash-lite} (free tier); the configured default, \texttt{gemini-3.8-flash}, was unavailable on the free tier on both test days, returning overload errors in all four attempted calls. Two automatic checks were applied to every output and each flagged output was then read. One output (2.5\%) was flagged for describing a fully correct topic as weak, but on reading it called that topic a strength, so none of the 40 outputs (0\%) presented a correctly answered topic as weak; 26 of the attempts had at least one fully correct topic. Five outputs (12.5\%) were flagged for naming a topic outside the quiz: in two, the model suggested advanced topics to study after a perfect score, and in three the flagged word occurred inside a quiz topic (for example, ``concurrency issues like dirty reads''), so no output introduced an unrelated topic as a weakness.
 
 \subsection{Scalability and Usability Evaluation}
 
@@ -293,7 +295,7 @@ $\boldsymbol{N}$ & $\boldsymbol{C}$ & \textbf{Login} & \textbf{Quiz start} & \te
 \end{tabular}
 \end{table}
 
-The mean LLM feedback latency was \tbd{s} seconds and the estimated cost was \tbd{cost} per quiz submission.
+For the 40 feedback requests, the LLM call took a mean of 4.7~s (median 2.4~s, 95th percentile 10.8~s, maximum 25.7~s), measured in the backend and including automatic retries; 2 of the 40 calls needed one retry after a provider overload error. Each call used a mean of 497 input and 196 output tokens. On the free tier used here the cost was \$0 per quiz submission, and since feedback is stored with the attempt, it is generated at most once per submission.
 
 \textbf{Usability.} \tbd{n$_s$} students and \tbd{n$_f$} faculty members used the platform for \tbd{task description} and completed the System Usability Scale (SUS) questionnaire. The mean SUS score was \tbd{score} for students and \tbd{score} for faculty.
 

@@ -1,0 +1,6 @@
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+Server running on port 5056
+MongoDB connected
+AI feedback: Gemini API error 503, retrying in 5 s
+AI feedback: Gemini API error 504, retrying in 15 s
+AI feedback: Gemini API error 504: {"error":{"code":504,"message":"Deadline expired before operation could complete.","status":"DEADLINE_EXCEEDED"}}

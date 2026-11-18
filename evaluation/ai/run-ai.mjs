@@ -6,7 +6,8 @@
 //   results/ai/latency.csv, summary.md, environment.json
 // Free-tier quotas are small: when Gemini reports the quota is used up, the run stops;
 // rerun later and it continues with the attempts that have no feedback yet.
-//   node ai/run-ai.mjs [--max-calls 50] [--delay 6] [--port 5056] [--report-only]
+//   node ai/run-ai.mjs [--model gemini-3.5-flash-lite] [--max-calls 50] [--delay 6] [--port 5056] [--report-only]
+// --model overrides GEMINI_MODEL for this run's backend only (server/.env is left unchanged)
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { connect, disconnect, models, EVAL_DIR } from "../lib/db.mjs";
@@ -24,6 +25,7 @@ const MAX_CALLS = Number(opt("max-calls", process.env.AI_FEEDBACK_MAX_CALLS || 5
 const DELAY_S = Number(opt("delay", 6)); // between calls, to stay under the free tier's per-minute limit
 const PORT = Number(opt("port", 5056));
 const REPORT_ONLY = args.includes("--report-only");
+const MODEL = opt("model", null);
 
 const OUT = join(EVAL_DIR, "results", "ai");
 const RAW = join(OUT, "feedback-raw.jsonl");
@@ -111,9 +113,11 @@ const callFeedback = async (baseUrl, item) => {
     text: body.feedback?.text || null,
     model: body.feedback?.model || null,
     llmLatencyMs: body.feedback?.latencyMs ?? null,
+    llmAttempts: body.feedback?.attempts ?? null,
     roundTripMs: Number(roundTripMs.toFixed(1)),
     inputTokens: body.feedback?.inputTokens ?? null,
     outputTokens: body.feedback?.outputTokens ?? null,
+    modelRequested: process.env.EVAL_MODEL_REQUESTED || null,
     calledAt: new Date().toISOString(),
   };
 };
@@ -134,7 +138,9 @@ const writeReport = (env) => {
   const done = new Map();
   for (const r of all) if (r.ok) done.set(r.attemptId, r);
   const rows = plan.map(p => done.get(p.attemptId)).filter(Boolean);
-  const failed = all.filter(r => !r.ok);
+  // Hitting this script's own call cap is not a model failure
+  const capHit = (r) => r.httpStatus === 429 && /limit reached/i.test(r.message || "");
+  const failed = all.filter(r => !r.ok && !capHit(r));
 
   const ratingRows = rows.map(r => {
     const wrong = r.topics.filter(t => !t.fullyCorrect).map(t => `${t.topic} (${t.earned}/${t.possible})`);
@@ -161,7 +167,7 @@ const writeReport = (env) => {
   writeCsv(join(OUT, "feedback-for-rating.csv"), Object.keys(ratingRows[0] || { attempt_id: "" }), ratingRows);
 
   const latencyRows = rows.map(r => ({
-    attempt_id: r.attemptId, model: r.model, llm_latency_ms: r.llmLatencyMs, endpoint_round_trip_ms: r.roundTripMs,
+    attempt_id: r.attemptId, model: r.model, llm_latency_ms: r.llmLatencyMs, llm_requests: r.llmAttempts, endpoint_round_trip_ms: r.roundTripMs,
     input_tokens: r.inputTokens, output_tokens: r.outputTokens, cost_usd: 0, called_at: r.calledAt,
   }));
   writeCsv(join(OUT, "latency.csv"), Object.keys(latencyRows[0] || { attempt_id: "" }), latencyRows);
@@ -170,6 +176,7 @@ const writeReport = (env) => {
   const rt = stats(rows.map(r => r.roundTripMs));
   const inTok = stats(rows.map(r => r.inputTokens));
   const outTok = stats(rows.map(r => r.outputTokens));
+  const retried = rows.filter(r => (r.llmAttempts || 1) > 1).length;
   const flagWeak = ratingRows.filter(r => r.auto_mentions_correct_topic_as_weak).length;
   const flagOff = ratingRows.filter(r => r.auto_mentions_topic_not_in_quiz).length;
   const withCorrect = ratingRows.filter(r => r.topics_correct).length;
@@ -189,12 +196,13 @@ const writeReport = (env) => {
     `| Input tokens per call | ${inTok.n} | ${f(inTok.mean)} | ${f(inTok.p50)} | ${f(inTok.p95)} | ${f(inTok.min)} | ${f(inTok.max)} |`,
     `| Output tokens per call (incl. thinking) | ${outTok.n} | ${f(outTok.mean)} | ${f(outTok.p50)} | ${f(outTok.p95)} | ${f(outTok.min)} | ${f(outTok.max)} |`,
     "",
-    "Cost per call: $0 (free tier). Token counts are reported by the API.", "",
+    "Cost per call: $0 (free tier). Token counts are reported by the API.",
+    `LLM latency includes automatic retries after Gemini overload errors (503/504/500; up to 2 retries, 5 s and 15 s apart). Calls that needed at least one retry: ${retried}/${rows.length}.`, "",
     "## Automatic checks (keyword heuristics; raters should confirm)", "",
     `- Feedback names a fully-correct topic in a clause about weakness: ${flagWeak}/${ratingRows.length} (${ratingRows.length ? ((100 * flagWeak) / ratingRows.length).toFixed(1) : "—"}%); ${withCorrect} attempts had at least one fully-correct topic`,
     `- Feedback mentions a topic that is not in the quiz: ${flagOff}/${ratingRows.length} (${ratingRows.length ? ((100 * flagOff) / ratingRows.length).toFixed(1) : "—"}%)`,
     "",
-    ...(failed.length ? ["## Failed calls", "", ...failed.map(r => `- ${r.attemptId} at ${r.calledAt}: HTTP ${r.httpStatus} ${r.message || ""}`), ""] : []),
+    ...(failed.length ? ["## Failed calls", "", ...failed.map(r => `- ${r.attemptId} at ${r.calledAt} (${r.modelRequested || "gemini-3.8-flash"}): HTTP ${r.httpStatus} ${r.message || ""}`), ""] : []),
   ];
   writeFileSync(join(OUT, "summary.md"), md.filter(l => l !== null).join("\n"));
   return { done: rows.length, failed: failed.length };
@@ -212,8 +220,11 @@ try {
     console.log(`[${db}] ${doneIds.size}/${plan.length} attempts already have feedback; ${todo.length} to go (cap ${MAX_CALLS} calls)`);
 
     if (todo.length) {
-      server = await startServer({ port: PORT, logPath: join(OUT, `server-${Date.now()}.log`), env: { AI_FEEDBACK_MAX_CALLS: String(MAX_CALLS) } });
+      server = await startServer({ port: PORT, logPath: join(OUT, `server-${Date.now()}.log`), env: { AI_FEEDBACK_MAX_CALLS: String(MAX_CALLS), ...(MODEL ? { GEMINI_MODEL: MODEL } : {}) } });
+      if (MODEL) console.log(`model for this run: ${MODEL}`);
+      process.env.EVAL_MODEL_REQUESTED = MODEL || process.env.GEMINI_MODEL || "gemini-3.8-flash";
       let calls = 0;
+      let consecutiveFailures = 0;
       for (const item of todo) {
         if (calls >= MAX_CALLS) { console.log(`LLM call cap (${MAX_CALLS}) reached`); break; }
         calls++;
@@ -222,6 +233,11 @@ try {
         console.log(`${row.attemptId} ${row.pattern}: HTTP ${row.httpStatus}` +
           (row.ok ? ` llm=${row.llmLatencyMs}ms tokens=${row.inputTokens}/${row.outputTokens}` : ` ${row.message}`));
         // Free-tier quota exhausted (or server cap hit): stop instead of burning through more attempts
+        consecutiveFailures = row.ok ? 0 : consecutiveFailures + 1;
+        if (consecutiveFailures >= 3) {
+          console.log("Stopping: 3 failures in a row (Gemini likely overloaded). Rerun later to continue.");
+          break;
+        }
         if (row.httpStatus === 503 || row.httpStatus === 429) {
           console.log("Stopping: quota/cap reached. Rerun later to continue.");
           break;
